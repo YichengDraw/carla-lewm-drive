@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import queue
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -341,6 +342,10 @@ def write_action_trace(output_dir: Path, episode_idx: int, rows: list[dict[str, 
     path = output_dir / f"actions_episode_{episode_idx:03d}.csv"
     fieldnames = [
         "step",
+        "carla_frame",
+        "sim_time_s",
+        "sim_delta_s",
+        "wall_delta_s",
         "route_progress_m",
         "speed_mps",
         "throttle",
@@ -400,11 +405,15 @@ def listen_queue(sensor):
 
 
 def wait_rgb(carla_world, image_queue, timeout_s: float) -> np.ndarray:
+    return wait_rgb_packet(carla_world, image_queue, timeout_s)[0]
+
+
+def wait_rgb_packet(carla_world, image_queue, timeout_s: float) -> tuple[np.ndarray, int, float]:
     frame_id = carla_world.tick()
     image = image_queue.get(timeout=timeout_s)
     while image.frame < frame_id:
         image = image_queue.get(timeout=timeout_s)
-    return read_rgb(image)
+    return read_rgb(image), int(image.frame), float(image.timestamp)
 
 
 def read_rgb(image) -> np.ndarray:
@@ -549,6 +558,8 @@ def run_episode(
     last_collision_count = 0
     blocked_seconds = 0.0
     step = 0
+    last_sim_time: float | None = None
+    last_wall_time: float | None = None
 
     ego = spawn_ego(carla, world, spawn_index)
     actors.append(ego)
@@ -605,7 +616,8 @@ def run_episode(
                 if action is not None:
                     ego.apply_control(to_vehicle_control(carla, action))
                     block_raw_actions.append(np.asarray(action, dtype=np.float32))
-                rgb = wait_rgb(world, image_queue, timeout_s)
+                rgb, frame_id, sim_time = wait_rgb_packet(world, image_queue, timeout_s)
+                wall_time = time.perf_counter()
                 latest_rgb = rgb
                 step += 1
 
@@ -641,6 +653,10 @@ def run_episode(
                     action_trace.append(
                         {
                             "step": int(step),
+                            "carla_frame": int(frame_id),
+                            "sim_time_s": float(sim_time),
+                            "sim_delta_s": float(0.0 if last_sim_time is None else sim_time - last_sim_time),
+                            "wall_delta_s": float(0.0 if last_wall_time is None else wall_time - last_wall_time),
                             "route_progress_m": float(acc.route_progress_m),
                             "speed_mps": float(speed),
                             "throttle": float(control.throttle),
@@ -651,6 +667,8 @@ def run_episode(
                             "collision_count": int(acc.collision_count),
                         }
                     )
+                last_sim_time = sim_time
+                last_wall_time = wall_time
                 maybe_store_frame(output_dir, frames, rgb, episode=episode_idx, step=step, eval_cfg=eval_cfg)
 
                 if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
@@ -716,6 +734,14 @@ def run_closed_loop_eval(cfg: dict[str, Any], checkpoint_path: Path | None, poli
         settings.synchronous_mode = True
         settings.fixed_delta_seconds = float(eval_cfg["fixed_delta_seconds"])
         world.apply_settings(settings)
+        applied_settings = world.get_settings()
+        if not bool(applied_settings.synchronous_mode):
+            raise RuntimeError("CARLA world did not enter synchronous_mode after apply_settings")
+        if abs(float(applied_settings.fixed_delta_seconds or 0.0) - float(eval_cfg["fixed_delta_seconds"])) > 1e-6:
+            raise RuntimeError(
+                "CARLA fixed_delta_seconds mismatch: "
+                f"expected {float(eval_cfg['fixed_delta_seconds'])}, got {applied_settings.fixed_delta_seconds}"
+            )
         traffic_manager.set_synchronous_mode(True)
         traffic_manager.set_random_device_seed(int(eval_cfg.get("traffic_manager_seed", 20260522)))
         set_weather(carla, world, str(eval_cfg.get("weather", "ClearNoon")))
