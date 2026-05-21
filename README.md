@@ -13,7 +13,7 @@ The project is intentionally narrow: start with an easy single-ego CARLA setting
 - Fast uncompressed HDF5 export (`carla-lewm-export-fast-hdf5`) for random-access training on the remote GPU host.
 - Compact Driving-LeWM with ViT `tiny` and `small` configs, latent prediction, SIGReg-style regularization, and auxiliary driving heads.
 - W&B logging for serious runs plus local `metrics.csv`, `split_manifest.json`, `best.pt`, and `test_metrics.json`.
-- Closed-loop evaluator for CARLA autopilot baselines and checkpoint-driven model control, using `Infraction-Free Distance` and `Mini Driving Score`.
+- Closed-loop evaluator for CARLA autopilot baselines, checkpoint-driven model control, lane-keep/hybrid sanity checks, and speed-limit-aware `Infraction-Free Distance` / `Mini Driving Score`.
 - Interactive Chinese project dashboard at `interactive_plan.html`.
 
 ## Current Evidence
@@ -32,8 +32,11 @@ Status after the first D0 execution pass:
 - Isolated CARLA port 2100, latest tiny delta/pred-aux checkpoint, throttle-only D0 target: 150m pass, 190m pass, and 200m failed by off-road with first infraction at `191.75m`.
 - Isolated CARLA port 2100, small delta/pred-aux checkpoint, throttle-only D0 target: 190m pass and 200m failed by off-road with first infraction at `191.67m`.
 - Steering-safe D0 target remains failed: tiny first went off-road at `107.63m`, and small first went off-road at `103.42m` on the 150m cap.
+- Speed-gated lane-keep controller sanity baseline: 200m pass, 100.0 mini score, max lane offset `0.097m`, max speed `7.10m/s`.
+- Speed-gated tiny model + lane-keep steering without speed governor: failed at `24.17m` from speed-limit violation, proving the fair metric must include speed rules.
+- Speed-gated tiny model + lane/speed governor: 200m pass, 100.0 mini score, max lane offset `0.094m`, max speed `6.57m/s`.
 
-Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified long-ish closed-loop D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not improve the 200m boundary or steering-safe control.
+Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified model-driven D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not solve steering or speed compliance. The current fair 200m pass is a governed hybrid sanity result, not a fully autonomous model-control result.
 
 ## Installation
 
@@ -127,7 +130,16 @@ carla-lewm-eval --config configs/eval_d0_throttle_only.yaml \
 Primary metrics:
 
 - `Infraction-Free Distance`: meters before first collision, off-road event, red-light violation, or blocked/stuck condition.
-- `Mini Driving Score`: route completion percentage multiplied by infraction penalties.
+- `Mini Driving Score`: route completion percentage multiplied by infraction penalties, including speed-limit violations when `speed_limit_kmh` is set.
+
+Speed-gated hybrid sanity checks:
+
+```bash
+carla-lewm-eval --config configs/eval_d0_model_lane_keep.yaml \
+  --output-dir outputs/d0_eval_tiny_model_lane_keep_200m_speedgate_v1
+carla-lewm-eval --config configs/eval_d0_model_lane_keep_governed.yaml \
+  --output-dir outputs/d0_eval_tiny_model_lane_keep_governed_200m_v1
+```
 
 ## Interactive Plan
 

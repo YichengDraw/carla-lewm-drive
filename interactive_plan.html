@@ -39,7 +39,7 @@
     section h2, details h2 { margin: 0 0 10px; font-size: 18px; }
     details summary { cursor: pointer; font-weight: 720; font-size: 17px; }
     a { color: var(--accent); }
-    .metrics { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 10px; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
     .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; }
     .metric strong { display: block; font-size: 18px; }
     .metric span { color: var(--muted); font-size: 13px; }
@@ -106,11 +106,12 @@
           <div class="metric"><span>Phase</span><strong>D0 pass</strong><span>采集、QC、训练、短评估完成</span></div>
           <div class="metric"><span>Dataset</span><strong>48k</strong><span>D0-train 严格 QC 通过</span></div>
           <div class="metric"><span>Best offline</span><strong>tiny delta</strong><span>test/loss 0.2147</span></div>
-          <div class="metric"><span>Best closed-loop</span><strong>190m</strong><span>tiny delta throttle-only 通过</span></div>
-          <div class="metric"><span>Next</span><strong>steering</strong><span>lane keeping 待修</span></div>
+          <div class="metric"><span>Model-only</span><strong>190m</strong><span>tiny delta throttle-only 通过</span></div>
+          <div class="metric"><span>Governed hybrid</span><strong>200m</strong><span>速度门控下通过</span></div>
+          <div class="metric"><span>Next</span><strong>actions</strong><span>模型控速和控向待修</span></div>
         </div>
         <div class="callout ok">
-          当前状态：数据和训练流水线可信；tiny/small delta-progress + predicted-aux 在隔离 CARLA 2100 端口和 throttle-only 简化目标下 190m 无 hard infraction。200m 边界仍约 191.7m，steering-safe 150m 在 103-108m 离路。small 没有解决瓶颈，下一步是 steering-safe/lane keeping。
+          当前状态：数据和训练流水线可信；tiny/small delta-progress + predicted-aux 在隔离 CARLA 2100 端口和 throttle-only 简化目标下 190m 无 hard infraction。严格速度门控后，未加 governor 的 model-lane-keep 在 24.17m 因超速失败；带 lane/speed governor 的 hybrid 200m 通过。这个 200m 是 governed sanity pass，不是模型完全自主控车。
         </div>
       </section>
 
@@ -125,6 +126,7 @@
           <tr><td><code>QC</code></td><td>Quality Control，逐帧检查缺帧、空白、动作异常、碰撞、离路、红灯和 blocked。</td></tr>
           <tr><td><code>IFD</code></td><td>Infraction-Free Distance，首次 hard infraction 前的行驶距离，越高越好。</td></tr>
           <tr><td><code>Mini Driving Score</code></td><td>路线完成度乘违规惩罚，用来防止只看是否开到终点。</td></tr>
+          <tr><td><code>speed gate</code></td><td>设置 <code>speed_limit_kmh</code> 后，持续超速会计入 hard infraction，并影响 IFD、Mini Score 和 success rate。</td></tr>
           <tr><td><code>CEM64</code></td><td>Cross-Entropy Method 规划器，64 个动作样本、2 次迭代、horizon 4，用于短程 sanity eval。</td></tr>
           <tr><td><code>throttle-only</code></td><td>当前有效简化目标：只允许模型选择油门，steer/brake 固定为 0，用来验证最小闭环能力。</td></tr>
           <tr><td><code>delta-progress</code></td><td>把 route progress 从绝对里程改成相邻样本的前进增量，避免模型把“已经走了多远”当作静态标签背下来。</td></tr>
@@ -179,7 +181,7 @@
             <td>ViT tiny</td><td>192</td><td>val 0.2156<br>test 0.2147<br>pred 0.0625<br>pred-aux 0.1025</td><td><div class="bar"><span style="width: 95%"></span></div>离线学习显著改善；闭环扩展到 190m，但 200m 未通过。</td>
           </tr>
           <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_delta_predaux_e5-20260522-054348-da4e9fd5"><code>d0_small_h3_fs5_delta_predaux_e5</code></a><br>当前 small，delta-progress + predicted-aux，训练中。</td>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_delta_predaux_e5-20260522-054348-da4e9fd5"><code>d0_small_h3_fs5_delta_predaux_e5</code></a><br>当前 small，delta-progress + predicted-aux，已完成。</td>
             <td>ViT small</td><td>96</td><td>val 0.3311<br>test 0.3300<br>pred 0.1243<br>pred-aux 0.1225</td><td><div class="bar"><span style="width: 65%"></span></div>best 来自 epoch 1；离线不如 tiny，闭环也没有突破 200m。</td>
           </tr>
         </table>
@@ -200,8 +202,11 @@
           <tr><td>small delta/pred-aux checkpoint</td><td>190m cap, isolated port 2100, throttle-only</td><td>190.00m</td><td>100.0</td><td><span class="tag good">pass</span> 和 tiny 持平。</td></tr>
           <tr><td>small delta/pred-aux checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.67m</td><td>70.0</td><td><span class="tag warn">boundary</span> 没有突破 tiny 边界。</td></tr>
           <tr><td>small delta/pred-aux checkpoint</td><td>150m cap, isolated port 2100, steering-safe</td><td>103.42m</td><td>70.0</td><td><span class="tag bad">fail</span> steering-safe 更早离路。</td></tr>
+          <tr><td>lane-keep controller</td><td>200m cap, isolated port 2100, speed gate 35km/h</td><td>200.00m</td><td>100.0</td><td><span class="tag good">pass</span> route 和指标可通过。</td></tr>
+          <tr><td>tiny delta + lane-keep steer</td><td>200m cap, speed gate 35km/h, no speed governor</td><td>24.17m</td><td>10.27</td><td><span class="tag bad">fail</span> 模型油门导致超速。</td></tr>
+          <tr><td>tiny delta + lane/speed governor</td><td>200m cap, speed gate 35km/h</td><td>200.00m</td><td>100.0</td><td><span class="tag good">pass</span> governed hybrid sanity pass。</td></tr>
         </table>
-        <div class="callout">有效性说明：早期 port 2000 model eval 被外部 HIL client tick 污染；当前 evaluator 已写 action/timing trace，并在 `sim_delta_s` 过大时 fail。</div>
+        <div class="callout">有效性说明：早期 port 2000 model eval 被外部 HIL client tick 污染；当前 evaluator 已写 action/timing/lane/speed trace，并在 `sim_delta_s` 过大时 fail。严格 fair gate 应使用 speed-limit-aware 配置。</div>
       </section>
 
       <section id="phases" data-kind="all">
@@ -214,12 +219,12 @@
           <p>目标：先 tiny，再在 tiny 闭环不理想后尝试 small；全程 W&B 记录。</p>
           <p>结果：tiny delta/pred-aux 离线 loss 最好并通过 190m throttle-only；small best 来自 epoch 1，离线和闭环都没有超过 tiny。</p>
         </details>
-        <details open data-kind="eval"><summary>Phase 4：简化闭环 sanity <span class="tag good">190m pass</span></summary>
+        <details open data-kind="eval"><summary>Phase 4：简化闭环 sanity <span class="tag good">hybrid 200m pass</span></summary>
           <p>目标：用 IFD 和 Mini Driving Score 检查模型能否短程不出错。</p>
-          <p>结果：隔离 CARLA + throttle-only 下 tiny/small delta-pred-aux 都 190m pass；200m 在约 191.7m off-road。steering-safe 150m 在 103-108m off-road，下一步需要恢复安全 steering。</p>
+          <p>结果：隔离 CARLA + throttle-only 下 tiny/small delta-pred-aux 都 190m pass；200m 在约 191.7m off-road。speed-gated model-lane-keep 无 governor 时 24.17m 因超速失败；带 lane/speed governor 后 200m pass。下一步需要让模型自己学会控速和控向。</p>
         </details>
         <details data-kind="risk"><summary>Phase 5：长程 500m / D1 低密交通 <span class="tag">not ready</span></summary>
-          <p>进入条件：200m throttle-only pass，并且 steering-enabled 目标至少 150m IFD 且无 hard infraction。</p>
+          <p>进入条件：200m speed-gated model policy pass，并且 steering-enabled 目标至少 150m IFD 且无 hard infraction。</p>
         </details>
       </section>
 
@@ -241,13 +246,17 @@ python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d0_throttle_only.yaml \
   --checkpoint outputs/d0_tiny_h3_fs5_delta_predaux_e5/best.pt \
   --route-cap-m 190 \
-  --output-dir outputs/d0_eval_tiny_delta_predaux_throttle_only_190m</code></pre>
+  --output-dir outputs/d0_eval_tiny_delta_predaux_throttle_only_190m
+
+python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d0_model_lane_keep_governed.yaml \
+  --output-dir outputs/d0_eval_tiny_model_lane_keep_governed_200m_v1</code></pre>
       </section>
 
       <section id="gates" data-kind="risk">
         <h2>Go / No-Go</h2>
         <div class="grid">
-          <div class="callout ok"><strong>Continue</strong><br>修 steering-safe/lane keeping，然后复跑 150m steering-safe 和 200m throttle-only。</div>
+          <div class="callout ok"><strong>Continue</strong><br>修模型控速和 steering-safe/lane keeping，然后复跑 150m steering-safe 与 200m speed-gated model policy。</div>
           <div class="callout"><strong>Pause</strong><br>离线 loss 继续下降但 IFD 不提升时，优先诊断控制闭环，不扩大模型。</div>
           <div class="callout bad"><strong>Stop</strong><br>W&B 未启动、QC 非严格通过、autopilot baseline 失败、或 `sim_delta_s` 出现外部 tick 跳变。</div>
           <div class="callout"><strong>Scale</strong><br>只有 steering-enabled 目标呈 capacity-limited 时，才继续跑更大 ViT。</div>

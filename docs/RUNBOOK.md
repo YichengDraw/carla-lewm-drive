@@ -164,11 +164,23 @@ python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --output-dir outputs/d0_eval_tiny_delta_predaux_throttle_only_190m
 ```
 
+Then run the fair speed-gated hybrid checks:
+
+```bash
+python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d0_model_lane_keep.yaml \
+  --output-dir outputs/d0_eval_tiny_model_lane_keep_200m_speedgate_v1
+
+python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d0_model_lane_keep_governed.yaml \
+  --output-dir outputs/d0_eval_tiny_model_lane_keep_governed_200m_v1
+```
+
 Gate:
 
 - Autopilot must score 100m IFD on the short route.
 - A model checkpoint must reach at least 190m IFD with no hard infraction on the throttle-only D0 target before longer runs are attempted.
-- A 200m throttle-only run must pass before longer 500m evaluation.
+- A 200m speed-gated model-policy run must pass before longer 500m evaluation.
 - A steering-safe 150m run must pass before claiming steering recovery.
 
 Observed valid result:
@@ -181,8 +193,11 @@ Observed valid result:
 - Latest tiny delta/pred-aux failed the steering-safe 150m run at 107.63m IFD by off-road.
 - Latest small delta/pred-aux passed 190m throttle-only, then failed the 200m throttle-only run at 191.67m IFD by off-road.
 - Latest small delta/pred-aux failed the steering-safe 150m run at 103.42m IFD by off-road.
+- Lane-keep controller passed 200m with the 35km/h speed gate, max lane offset 0.097m, max speed 7.10m/s.
+- Tiny delta/pred-aux plus lane-keep steering failed the speed-gated 200m run at 24.17m by speed-limit violation.
+- Tiny delta/pred-aux plus lane/speed governor passed 200m with the 35km/h speed gate, max lane offset 0.094m, max speed 6.57m/s.
 - Earlier port-2000 model-policy outputs were invalidated because an external HIL client was ticking CARLA during model inference.
 
 ## Stop Rule
 
-Do not spend more time on larger ViTs until steering/lane keeping is fixed. Delta-progress and predicted-aux are now tested on tiny and small; the current useful work is steering-safe calibration before any 500m run.
+Do not spend more time on larger ViTs until model-controlled speed and steering/lane keeping are fixed. Delta-progress and predicted-aux are now tested on tiny and small; the current useful work is action/control calibration before any 500m run.

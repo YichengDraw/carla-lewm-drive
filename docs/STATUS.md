@@ -4,9 +4,11 @@ Last checked: 2026-05-22 Asia/Shanghai.
 
 ## Verdict
 
-The first strict D0 pass is complete end to end: clean CARLA data was collected, QC passed, tiny and small historical LeWM variants were trained with W&B, a tiny delta-progress + predicted-aux variant was trained, and closed-loop CARLA evaluation now has timing guards against external simulator ticks.
+The first strict D0 pass is complete end to end: clean CARLA data was collected, QC passed, tiny and small historical LeWM variants were trained with W&B, a tiny delta-progress + predicted-aux variant was trained, and closed-loop CARLA evaluation now has timing guards plus speed-limit-aware scoring.
 
-The current valid success claim is intentionally narrow: on an isolated CARLA server and a throttle-only D0 target, the latest tiny and small delta/pred-aux checkpoints reach 190m with no hard infractions. At 200m they fail by off-road at 191.75m and 191.67m, and steering-safe 150m still fails at 107.63m and 103.42m. The next gate is fixing steering/lane keeping before any 500m run.
+The current valid model-only success claim is intentionally narrow: on an isolated CARLA server and a throttle-only D0 target, the latest tiny and small delta/pred-aux checkpoints reach 190m with no hard infractions. At 200m they fail by off-road at 191.75m and 191.67m, and steering-safe 150m still fails at 107.63m and 103.42m.
+
+The new 200m pass is a governed hybrid sanity result: tiny LeWM stays in the loop for throttle/brake planning, while lane keeping and speed limiting are guarded by deterministic feedback. Without the speed governor, the same hybrid fails the fair speed-gated metric at 24.17m from speeding.
 
 ## Repository And Environment
 
@@ -62,6 +64,9 @@ Batch/resource notes:
 | Small delta/pred-aux checkpoint | 1 | 190m | isolated port 2100, throttle-only CEM | 190.00m | 100.0 | pass |
 | Small delta/pred-aux checkpoint | 1 | 200m | isolated port 2100, throttle-only CEM | 191.67m | 70.0 | failed off-road |
 | Small delta/pred-aux checkpoint | 1 | 150m | isolated port 2100, steering-safe CEM | 103.42m | 70.0 | failed off-road |
+| Lane-keep controller | 1 | 200m | isolated port 2100, speed gate 35km/h | 200.00m | 100.0 | pass |
+| Tiny delta/pred-aux checkpoint + lane-keep steer | 1 | 200m | isolated port 2100, speed gate 35km/h | 24.17m | 10.27 | failed speed-limit |
+| Tiny delta/pred-aux checkpoint + lane/speed governor | 1 | 200m | isolated port 2100, speed gate 35km/h | 200.00m | 100.0 | governed hybrid pass |
 | Tiny checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 | Small checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 
@@ -70,6 +75,7 @@ Interpretation:
 - The autopilot baseline verifies that the route, CARLA world, and metric implementation are usable.
 - The valid model-policy results require an isolated CARLA server. The evaluator now records `sim_delta_s` and raises on external tick jumps.
 - The throttle-only target shows the model can sustain a simplified long-ish control loop up to 190m. The small ViT did not move the 200m boundary, and the steering-safe failures show that route-following still needs steering/lane-keeping calibration.
+- The speed-gated trace shows the fair metric matters: ungoverned model-lane-keep reaches only 24.17m before speed-limit violation, while governed hybrid reaches 200m with max speed `6.57m/s` and max lane offset `0.094m`.
 
 ## Completed Code Work
 
@@ -77,14 +83,15 @@ Interpretation:
 - Added strict HDF5 QC thresholds and `--allow-infractions` escape hatch.
 - Added fast HDF5 export for random-access training.
 - Hardened training around batch probing, W&B run IDs/resume policy, local CSV fields, checkpoint selection, and CLI overrides.
-- Added CARLA closed-loop evaluator for autopilot, constant-action, and checkpoint policies, including short-eval CLI overrides, action traces, and CARLA timing guards.
+- Added CARLA closed-loop evaluator for autopilot, constant-action, checkpoint, lane-keep, and model-lane-keep policies, including short-eval CLI overrides, action traces, lane/heading trace columns, speed-limit infractions, and CARLA timing guards.
 - Added tests for QC, training reliability, fast export, metrics, closed-loop evaluator, and delta-progress/predicted-aux targets.
 
 ## Current Next Gate
 
-The active next gate is to fix the closed-loop steering/action pathway:
+The active next gate is to fix the model-controlled steering/action pathway:
 
 1. Keep delta-progress and predicted-aux as the current default objective.
-2. Add a stronger steering-safe action prior or behavior-cloning action head before re-enabling steering.
-3. Re-run 150m steering-safe and 200m throttle-only on isolated CARLA.
-4. Only attempt 500m after 200m passes without off-road.
+2. Add speed-aware action supervision or a stronger action head before treating model throttle as fair.
+3. Add a stronger steering-safe action prior or behavior-cloning action head before re-enabling model steering.
+4. Re-run 150m steering-safe and 200m speed-gated model-lane-keep on isolated CARLA.
+5. Only attempt 500m after 200m passes without off-road or speed-limit infractions.
