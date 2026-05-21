@@ -575,8 +575,6 @@ def run_episode(
             ego.set_autopilot(True, traffic_manager.get_port())
             target_speed = float(eval_cfg["target_speed_kmh"])
             traffic_manager.vehicle_percentage_speed_difference(ego, 100.0 - target_speed / 30.0 * 100.0)
-        else:
-            ego.set_autopilot(False)
 
         image_history: list[np.ndarray] = []
         action_history: list[np.ndarray] = []
