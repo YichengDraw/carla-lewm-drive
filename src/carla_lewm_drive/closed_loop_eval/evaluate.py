@@ -262,6 +262,8 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
         dropout=float(model_cfg["dropout"]),
         sigreg_weight=float(model_cfg["sigreg_weight"]),
         aux_weight=float(model_cfg["aux_weight"]),
+        pred_aux_weight=float(model_cfg.get("pred_aux_weight", 1.0)),
+        progress_mode=str(model_cfg.get("progress_mode", "absolute")),
     )
     model = DrivingLeWM(lewm_cfg)
     model.load_state_dict(payload["model"], strict=True)

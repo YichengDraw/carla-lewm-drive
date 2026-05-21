@@ -24,6 +24,8 @@ model:
   dropout: 0.1
   sigreg_weight: 0.09
   aux_weight: 0.2
+  pred_aux_weight: 1.0
+  progress_mode: delta
 
 optimizer:
   lr: 5.0e-5
@@ -36,7 +38,7 @@ trainer:
   precision: bf16
   gradient_clip_norm: 1.0
   log_every_steps: 50
-  eval_every_epochs: 5
+  eval_every_epochs: 1
   batch_probe_order: [128, 96, 64, 48, 32]
 
 wandb:

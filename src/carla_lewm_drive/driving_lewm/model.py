@@ -28,6 +28,8 @@ class DrivingLeWMConfig:
     dropout: float = 0.1
     sigreg_weight: float = 0.09
     aux_weight: float = 0.2
+    pred_aux_weight: float = 1.0
+    progress_mode: str = "absolute"
 
 
 class ActionEmbedder(nn.Module):
@@ -137,7 +139,8 @@ class DrivingLeWM(nn.Module):
         target = emb[:, 1 : self.cfg.history_size + 1].detach()
         pred = pred[:, : target.shape[1]]
         aux = self.aux_head(emb)
-        return {"emb": emb, "pred_emb": pred, "target_emb": target, "aux": aux}
+        pred_aux = self.aux_head(pred)
+        return {"emb": emb, "pred_emb": pred, "target_emb": target, "aux": aux, "pred_aux": pred_aux}
 
     @staticmethod
     def sigreg_loss(emb: torch.Tensor) -> torch.Tensor:
@@ -146,15 +149,25 @@ class DrivingLeWM(nn.Module):
         std_loss = (flat.std(dim=0, unbiased=False) - 1.0).square().mean()
         return mean_loss + std_loss
 
-    def loss(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        out = self.forward(batch)
-        pred_loss = F.mse_loss(out["pred_emb"], out["target_emb"])
-        sigreg = self.sigreg_loss(out["emb"])
+    @staticmethod
+    def progress_signal(route_progress_m: torch.Tensor, mode: str) -> torch.Tensor:
+        mode = str(mode).lower()
+        if mode == "absolute":
+            return route_progress_m.float()
+        if mode == "delta":
+            progress = route_progress_m.float()
+            delta = torch.zeros_like(progress)
+            delta[:, 1:] = progress[:, 1:] - progress[:, :-1]
+            return delta
+        raise ValueError(f"Unknown progress_mode {mode!r}; expected 'absolute' or 'delta'")
 
-        aux_target = torch.cat(
+    @classmethod
+    def aux_target(cls, batch: dict[str, torch.Tensor], progress_mode: str) -> torch.Tensor:
+        progress = cls.progress_signal(batch["route_progress_m"], progress_mode)
+        return torch.cat(
             [
                 batch["speed_mps"],
-                batch["route_progress_m"],
+                progress,
                 batch["lane_offset_m"],
                 batch["heading_error_rad"],
                 batch["collision"],
@@ -164,13 +177,24 @@ class DrivingLeWM(nn.Module):
             ],
             dim=-1,
         ).float()
+
+    def loss(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        out = self.forward(batch)
+        pred_loss = F.mse_loss(out["pred_emb"], out["target_emb"])
+        sigreg = self.sigreg_loss(out["emb"])
+
+        aux_target = self.aux_target(batch, self.cfg.progress_mode)
+        pred_aux_target = aux_target[:, 1 : self.cfg.history_size + 1].detach()
         aux_loss = F.smooth_l1_loss(out["aux"], aux_target)
-        total = pred_loss + self.cfg.sigreg_weight * sigreg + self.cfg.aux_weight * aux_loss
+        pred_aux_loss = F.smooth_l1_loss(out["pred_aux"], pred_aux_target)
+        aux_total = aux_loss + self.cfg.pred_aux_weight * pred_aux_loss
+        total = pred_loss + self.cfg.sigreg_weight * sigreg + self.cfg.aux_weight * aux_total
         return {
             "loss": total,
             "pred_loss": pred_loss.detach(),
             "sigreg_loss": sigreg.detach(),
             "aux_loss": aux_loss.detach(),
+            "pred_aux_loss": pred_aux_loss.detach(),
         }
 
     @torch.no_grad()

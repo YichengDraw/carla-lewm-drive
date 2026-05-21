@@ -366,7 +366,7 @@ def evaluate_loss(
     limit_batches: int | None = None,
 ) -> dict[str, float]:
     model.eval()
-    totals = {"loss": 0.0, "pred_loss": 0.0, "sigreg_loss": 0.0, "aux_loss": 0.0}
+    totals: dict[str, float] = {}
     count = 0
     for step, batch in enumerate(loader, start=1):
         if limit_batches is not None and step > int(limit_batches):
@@ -374,7 +374,8 @@ def evaluate_loss(
         batch = move_batch(batch, device)
         with autocast_context(device, cfg):
             losses = model.loss(batch)
-        for key in totals:
+        for key in losses:
+            totals.setdefault(key, 0.0)
             totals[key] += float(losses[key].detach().cpu())
         count += 1
     if count == 0:
