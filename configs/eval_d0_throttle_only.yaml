@@ -2,7 +2,7 @@ eval:
   label: d0_throttle_only_closed_loop
   policy: checkpoint
   dataset_path: data/d0_train/carla_d0_train.h5
-  checkpoint_path: outputs/d0_tiny_h3_fs5_fast_e5/best.pt
+  checkpoint_path: outputs/d0_tiny_h3_fs5_delta_predaux_e5/best.pt
   output_dir: outputs/d0_eval_throttle_only
   host: 127.0.0.1
   port: 2100

@@ -23,14 +23,17 @@ Status after the first D0 execution pass:
 - `D0-smoke`: 20 accepted episodes, 12,000 frames, strict QC pass, 0 collision/off-road/red-light/blocked frames.
 - `D0-train`: 80 accepted episodes, 48,000 frames, strict QC pass, 0 collision/off-road/red-light/blocked frames.
 - Fast training dataset: `data/d0_train/carla_d0_train_fast.h5`, used because the compressed HDF5 path was too slow for random reads.
-- Tiny 5-epoch W&B run: [`d0_tiny_h3_fs5_fast_e5`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_fast_e5-20260522-014214-db1cb3e1), test loss `2.9620`, test pred loss `0.7015`.
-- Small 5-epoch W&B run: [`d0_small_h3_fs5_fast_e5`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e), test loss `1.1324`, test pred loss `0.5269`.
+- Historical absolute-progress tiny run: [`d0_tiny_h3_fs5_fast_e5`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_fast_e5-20260522-014214-db1cb3e1), test loss `2.9620`, test pred loss `0.7015`.
+- Historical absolute-progress small run: [`d0_small_h3_fs5_fast_e5`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e), test loss `1.1324`, test pred loss `0.5269`.
+- Current tiny delta-progress + predicted-aux run: [`d0_tiny_h3_fs5_delta_predaux_e5`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_e5-20260522-042925-552fb819), test loss `0.2147`, test pred loss `0.0625`, test aux loss `0.1606`, test pred-aux loss `0.1025`.
+- Current small delta-progress + predicted-aux run: [`d0_small_h3_fs5_delta_predaux_e5`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_delta_predaux_e5-20260522-054348-da4e9fd5), best checkpoint from epoch 1, test loss `0.3300`, test pred loss `0.1243`, test pred-aux loss `0.1225`.
 - Autopilot short baseline: 2/2 episodes, 100m mean infraction-free distance, 100.0 mean mini driving score.
 - The first model sanity runs on port 2000 were invalid for model-policy conclusions because an external HIL client was also ticking CARLA. The evaluator now writes action/timing traces and fails on external tick jumps.
-- Isolated CARLA port 2100, throttle-only D0 target: tiny and small checkpoints both reached 150m IFD with 100.0 mini driving score. Tiny reached 191.11m IFD on a 200m cap before off-road; small reached 191.87m in the same 200m setting.
-- Wider steering CEM remains unreliable: tiny/small select negative steering at the planner boundary and leave the lane. The simplified throttle-only target is the current fair success claim.
+- Isolated CARLA port 2100, latest tiny delta/pred-aux checkpoint, throttle-only D0 target: 150m pass, 190m pass, and 200m failed by off-road with first infraction at `191.75m`.
+- Isolated CARLA port 2100, small delta/pred-aux checkpoint, throttle-only D0 target: 190m pass and 200m failed by off-road with first infraction at `191.67m`.
+- Steering-safe D0 target remains failed: tiny first went off-road at `107.63m`, and small first went off-road at `103.42m` on the 150m cap.
 
-Interpretation: the data and training pipeline are usable, and the tiny LeWM can satisfy a very simplified long-ish closed-loop D0 target. Increasing ViT size improved offline losses but did not extend the throttle-only 200m boundary, so the next bottleneck is still planner/objective/action calibration rather than raw encoder capacity.
+Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified long-ish closed-loop D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not improve the 200m boundary or steering-safe control.
 
 ## Installation
 
@@ -95,11 +98,11 @@ carla-lewm-train --config configs/train_tiny.yaml \
   --batch-size 192 \
   --num-workers 2 \
   --max-epochs 5 \
-  --output-dir outputs/d0_tiny_h3_fs5_fast_e5 \
-  --run-name d0_tiny_h3_fs5_fast_e5
+  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_e5 \
+  --run-name d0_tiny_h3_fs5_delta_predaux_e5
 ```
 
-Use `configs/train_small.yaml` only after tiny has failed a controlled gate. In the first valid isolated evaluation, `small` improved offline loss but did not extend the throttle-only 200m boundary, so further model scaling is not the next step.
+Use `configs/train_small.yaml` only after tiny has failed a controlled gate. In this D0 run, small delta-progress + predicted-aux did not improve the throttle-only 200m boundary or the steering-safe 150m gate, so the next useful work is control/objective calibration rather than a larger ViT.
 
 ## Evaluation
 
@@ -107,7 +110,7 @@ The metric layer is implemented in `carla_lewm_drive.closed_loop_eval.metrics`. 
 
 ```bash
 carla-lewm-eval --config configs/eval_d0.yaml --baseline autopilot --episodes 2 --route-cap-m 100 --max-episode-seconds 30
-carla-lewm-eval --config configs/eval_d0.yaml --checkpoint outputs/d0_tiny_h3_fs5_fast_e5/best.pt \
+carla-lewm-eval --config configs/eval_d0.yaml --checkpoint outputs/d0_tiny_h3_fs5_delta_predaux_e5/best.pt \
   --episodes 1 --route-cap-m 50 --max-episode-seconds 8 \
   --planner-samples 64 --planner-iterations 2 --planner-horizon 4
 ```
@@ -116,8 +119,9 @@ For the current validated simplified target, use an isolated CARLA server on por
 
 ```bash
 carla-lewm-eval --config configs/eval_d0_throttle_only.yaml \
-  --checkpoint outputs/d0_tiny_h3_fs5_fast_e5/best.pt \
-  --output-dir outputs/d0_eval_tiny_throttle_only_150m
+  --checkpoint outputs/d0_tiny_h3_fs5_delta_predaux_e5/best.pt \
+  --route-cap-m 190 \
+  --output-dir outputs/d0_eval_tiny_delta_predaux_throttle_only_190m
 ```
 
 Primary metrics:

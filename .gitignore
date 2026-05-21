@@ -17,6 +17,7 @@ wandb/
 outputs_qc_*
 eval_*_contact_sheet.jpg
 eval_*_summary.json
+actions_*.csv
 *.h5
 *.hdf5
 *.ckpt

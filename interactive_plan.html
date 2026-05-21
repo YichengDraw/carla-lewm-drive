@@ -105,12 +105,12 @@
         <div class="metrics">
           <div class="metric"><span>Phase</span><strong>D0 pass</strong><span>采集、QC、训练、短评估完成</span></div>
           <div class="metric"><span>Dataset</span><strong>48k</strong><span>D0-train 严格 QC 通过</span></div>
-          <div class="metric"><span>Best offline</span><strong>small</strong><span>test/loss 1.1324</span></div>
-          <div class="metric"><span>Best closed-loop</span><strong>150m</strong><span>tiny/small throttle-only 通过</span></div>
-          <div class="metric"><span>Next</span><strong>steering</strong><span>修动作目标和转向规划</span></div>
+          <div class="metric"><span>Best offline</span><strong>tiny delta</strong><span>test/loss 0.2147</span></div>
+          <div class="metric"><span>Best closed-loop</span><strong>190m</strong><span>tiny delta throttle-only 通过</span></div>
+          <div class="metric"><span>Next</span><strong>steering</strong><span>lane keeping 待修</span></div>
         </div>
         <div class="callout ok">
-          当前状态：数据和训练流水线可信；在隔离 CARLA 2100 端口和 throttle-only 简化目标下，tiny/small 都能 150m 无 hard infraction。200m 边界约 191m，下一步是转向/action objective 校准。
+          当前状态：数据和训练流水线可信；tiny/small delta-progress + predicted-aux 在隔离 CARLA 2100 端口和 throttle-only 简化目标下 190m 无 hard infraction。200m 边界仍约 191.7m，steering-safe 150m 在 103-108m 离路。small 没有解决瓶颈，下一步是 steering-safe/lane keeping。
         </div>
       </section>
 
@@ -127,6 +127,10 @@
           <tr><td><code>Mini Driving Score</code></td><td>路线完成度乘违规惩罚，用来防止只看是否开到终点。</td></tr>
           <tr><td><code>CEM64</code></td><td>Cross-Entropy Method 规划器，64 个动作样本、2 次迭代、horizon 4，用于短程 sanity eval。</td></tr>
           <tr><td><code>throttle-only</code></td><td>当前有效简化目标：只允许模型选择油门，steer/brake 固定为 0，用来验证最小闭环能力。</td></tr>
+          <tr><td><code>delta-progress</code></td><td>把 route progress 从绝对里程改成相邻样本的前进增量，避免模型把“已经走了多远”当作静态标签背下来。</td></tr>
+          <tr><td><code>pred_aux</code></td><td>从预测 latent 上直接回归速度、油门、转向、制动、路线增量等辅助状态，迫使预测状态对控制规划有用。</td></tr>
+          <tr><td><code>pred_aux_loss</code></td><td>预测 latent 的辅助回归损失，越低表示模型预测的下一步 latent 更包含驾驶相关信息。</td></tr>
+          <tr><td><code>steering-safe</code></td><td>极窄转向范围的闭环配置，目标是恢复安全转向；当前 tiny/small delta-pred-aux 都失败。</td></tr>
           <tr><td><code>sim_delta_s</code></td><td>相邻控制 tick 的 CARLA 仿真时间差；过大说明有外部客户端推进世界，评估应判无效。</td></tr>
           <tr><td><code>D0</code></td><td>单车、白天、固定简化路线、强约束质量门控，是第一阶段最简单数据分布。</td></tr>
         </table>
@@ -134,7 +138,7 @@
 
       <section id="decoder" data-kind="train">
         <h2>实验名解码</h2>
-        <p><code>d0_tiny_h3_fs5_fast_e5</code>：D0 简化路线、ViT tiny、3 帧历史、5 帧合并一个动作步、fast HDF5、训练 5 epoch。</p>
+        <p><code>d0_tiny_h3_fs5_delta_predaux_e5</code>：D0 简化路线、ViT tiny、3 帧历史、5 帧合并一个动作步、delta-progress 目标、predicted-aux 辅助头、训练 5 epoch。</p>
         <table>
           <tr><th>片段</th><th>含义</th></tr>
           <tr><td><code>d0</code></td><td>单车低速白天简化场景。</td></tr>
@@ -142,6 +146,8 @@
           <tr><td><code>h3</code></td><td>模型输入 3 个历史视觉状态。</td></tr>
           <tr><td><code>fs5</code></td><td>CARLA 20Hz 控制每 5 帧合并，模型步长约 0.25s。</td></tr>
           <tr><td><code>fast</code></td><td>使用未压缩/chunked HDF5，避免训练随机读取卡住。</td></tr>
+          <tr><td><code>delta</code></td><td>route progress 使用相邻样本增量，作为当前默认目标。</td></tr>
+          <tr><td><code>predaux</code></td><td>训练预测 latent 上的辅助驾驶状态回归头。</td></tr>
           <tr><td><code>e5</code></td><td>训练 5 epoch，用于第一轮可比实验。</td></tr>
         </table>
       </section>
@@ -161,15 +167,23 @@
         <table>
           <tr><th>Run</th><th>模型</th><th>Batch</th><th>Val/Test</th><th>曲线读法</th></tr>
           <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_fast_e5-20260522-014214-db1cb3e1"><code>d0_tiny_h3_fs5_fast_e5</code></a><br>tiny、D0、fast HDF5、5 epoch。</td>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_fast_e5-20260522-014214-db1cb3e1"><code>d0_tiny_h3_fs5_fast_e5</code></a><br>历史 absolute-progress tiny、D0、fast HDF5、5 epoch。</td>
             <td>ViT tiny</td><td>192</td><td>val 2.9568<br>test 2.9620<br>pred 0.7015</td><td><div class="bar"><span style="width: 38%"></span></div>离线 loss 有下降，但闭环仍离路。</td>
           </tr>
           <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e"><code>d0_small_h3_fs5_fast_e5</code></a><br>small、D0、fast HDF5、5 epoch。</td>
-            <td>ViT small</td><td>128</td><td>val 1.1281<br>test 1.1324<br>pred 0.5269</td><td><div class="bar"><span style="width: 75%"></span></div>离线 loss 更好，但闭环直接 blocked。</td>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e"><code>d0_small_h3_fs5_fast_e5</code></a><br>历史 absolute-progress small、D0、fast HDF5、5 epoch。</td>
+            <td>ViT small</td><td>128</td><td>val 1.1281<br>test 1.1324<br>pred 0.5269</td><td><div class="bar"><span style="width: 75%"></span></div>离线 loss 更好，但未突破 200m throttle-only 边界。</td>
+          </tr>
+          <tr>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_e5-20260522-042925-552fb819"><code>d0_tiny_h3_fs5_delta_predaux_e5</code></a><br>当前 tiny，delta-progress + predicted-aux，5 epoch。</td>
+            <td>ViT tiny</td><td>192</td><td>val 0.2156<br>test 0.2147<br>pred 0.0625<br>pred-aux 0.1025</td><td><div class="bar"><span style="width: 95%"></span></div>离线学习显著改善；闭环扩展到 190m，但 200m 未通过。</td>
+          </tr>
+          <tr>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_delta_predaux_e5-20260522-054348-da4e9fd5"><code>d0_small_h3_fs5_delta_predaux_e5</code></a><br>当前 small，delta-progress + predicted-aux，训练中。</td>
+            <td>ViT small</td><td>96</td><td>val 0.3311<br>test 0.3300<br>pred 0.1243<br>pred-aux 0.1225</td><td><div class="bar"><span style="width: 65%"></span></div>best 来自 epoch 1；离线不如 tiny，闭环也没有突破 200m。</td>
           </tr>
         </table>
-        <div class="callout">当前结论：W&B 曲线和 test loss 只能证明离线拟合变好。small loss 更低，但没有把 throttle-only 200m 边界推过 200m。</div>
+        <div class="callout">当前结论：W&B 曲线和 test loss 只能证明离线拟合变好。tiny/small 都通过 190m，但 200m 与 steering-safe 仍需要闭环修复。</div>
       </section>
 
       <section id="eval" data-kind="eval">
@@ -177,10 +191,15 @@
         <table>
           <tr><th>Policy</th><th>配置</th><th>IFD</th><th>Mini Score</th><th>结论</th></tr>
           <tr><td>Autopilot baseline</td><td>2 episodes, 100m cap</td><td>100.00m</td><td>100.0</td><td><span class="tag good">pass</span> 环境和指标可信。</td></tr>
-          <tr><td>tiny checkpoint</td><td>150m cap, isolated port 2100, throttle-only</td><td>150.00m</td><td>100.0</td><td><span class="tag good">pass</span> 当前最小有效闭环结果。</td></tr>
-          <tr><td>small checkpoint</td><td>150m cap, isolated port 2100, throttle-only</td><td>150.00m</td><td>100.0</td><td><span class="tag good">pass</span> 和 tiny 持平。</td></tr>
-          <tr><td>tiny checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.11m</td><td>70.0</td><td><span class="tag warn">boundary</span> 近终点 off-road。</td></tr>
-          <tr><td>small checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.87m</td><td>70.0</td><td><span class="tag warn">boundary</span> 更大 ViT 没有解决边界。</td></tr>
+          <tr><td>historical tiny checkpoint</td><td>150m cap, isolated port 2100, throttle-only</td><td>150.00m</td><td>100.0</td><td><span class="tag good">pass</span> 历史 sanity pass。</td></tr>
+          <tr><td>historical small checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.87m</td><td>70.0</td><td><span class="tag warn">boundary</span> 更大 ViT 没有解决边界。</td></tr>
+          <tr><td>tiny delta/pred-aux checkpoint</td><td>150m cap, isolated port 2100, throttle-only</td><td>150.00m</td><td>100.0</td><td><span class="tag good">pass</span> 当前最小有效闭环结果。</td></tr>
+          <tr><td>tiny delta/pred-aux checkpoint</td><td>190m cap, isolated port 2100, throttle-only</td><td>190.00m</td><td>100.0</td><td><span class="tag good">pass</span> 当前有效主指标。</td></tr>
+          <tr><td>tiny delta/pred-aux checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.75m</td><td>70.0</td><td><span class="tag warn">boundary</span> 接近 200m 时 off-road。</td></tr>
+          <tr><td>tiny delta/pred-aux checkpoint</td><td>150m cap, isolated port 2100, steering-safe</td><td>107.63m</td><td>70.0</td><td><span class="tag bad">fail</span> 转向仍会推向右侧路缘。</td></tr>
+          <tr><td>small delta/pred-aux checkpoint</td><td>190m cap, isolated port 2100, throttle-only</td><td>190.00m</td><td>100.0</td><td><span class="tag good">pass</span> 和 tiny 持平。</td></tr>
+          <tr><td>small delta/pred-aux checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.67m</td><td>70.0</td><td><span class="tag warn">boundary</span> 没有突破 tiny 边界。</td></tr>
+          <tr><td>small delta/pred-aux checkpoint</td><td>150m cap, isolated port 2100, steering-safe</td><td>103.42m</td><td>70.0</td><td><span class="tag bad">fail</span> steering-safe 更早离路。</td></tr>
         </table>
         <div class="callout">有效性说明：早期 port 2000 model eval 被外部 HIL client tick 污染；当前 evaluator 已写 action/timing trace，并在 `sim_delta_s` 过大时 fail。</div>
       </section>
@@ -193,11 +212,11 @@
         </details>
         <details open data-kind="train"><summary>Phase 2-3：tiny / small 训练 <span class="tag good">done</span></summary>
           <p>目标：先 tiny，再在 tiny 闭环不理想后尝试 small；全程 W&B 记录。</p>
-          <p>结果：small 离线 loss 更低，但闭环更差；模型大小不是当前主瓶颈。</p>
+          <p>结果：tiny delta/pred-aux 离线 loss 最好并通过 190m throttle-only；small best 来自 epoch 1，离线和闭环都没有超过 tiny。</p>
         </details>
-        <details open data-kind="eval"><summary>Phase 4：简化闭环 sanity <span class="tag good">150m pass</span></summary>
+        <details open data-kind="eval"><summary>Phase 4：简化闭环 sanity <span class="tag good">190m pass</span></summary>
           <p>目标：用 IFD 和 Mini Driving Score 检查模型能否短程不出错。</p>
-          <p>结果：隔离 CARLA + throttle-only 下 tiny/small 均 150m pass；200m 在约 191m off-road。下一步需要恢复安全 steering。</p>
+          <p>结果：隔离 CARLA + throttle-only 下 tiny/small delta-pred-aux 都 190m pass；200m 在约 191.7m off-road。steering-safe 150m 在 103-108m off-road，下一步需要恢复安全 steering。</p>
         </details>
         <details data-kind="risk"><summary>Phase 5：长程 500m / D1 低密交通 <span class="tag">not ready</span></summary>
           <p>进入条件：200m throttle-only pass，并且 steering-enabled 目标至少 150m IFD 且无 hard infraction。</p>
@@ -215,19 +234,20 @@ python -m carla_lewm_drive.driving_lewm.train \
   --config configs/train_tiny.yaml \
   --dataset-path data/d0_train/carla_d0_train_fast.h5 \
   --batch-size 192 --num-workers 2 --max-epochs 5 \
-  --output-dir outputs/d0_tiny_h3_fs5_fast_e5 \
-  --run-name d0_tiny_h3_fs5_fast_e5
+  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_e5 \
+  --run-name d0_tiny_h3_fs5_delta_predaux_e5
 
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d0_throttle_only.yaml \
-  --checkpoint outputs/d0_tiny_h3_fs5_fast_e5/best.pt \
-  --output-dir outputs/d0_eval_tiny_throttle_only_150m</code></pre>
+  --checkpoint outputs/d0_tiny_h3_fs5_delta_predaux_e5/best.pt \
+  --route-cap-m 190 \
+  --output-dir outputs/d0_eval_tiny_delta_predaux_throttle_only_190m</code></pre>
       </section>
 
       <section id="gates" data-kind="risk">
         <h2>Go / No-Go</h2>
         <div class="grid">
-          <div class="callout ok"><strong>Continue</strong><br>修 delta-progress objective、pred-aux head、steering-safe prior，然后复跑 150m/200m。</div>
+          <div class="callout ok"><strong>Continue</strong><br>修 steering-safe/lane keeping，然后复跑 150m steering-safe 和 200m throttle-only。</div>
           <div class="callout"><strong>Pause</strong><br>离线 loss 继续下降但 IFD 不提升时，优先诊断控制闭环，不扩大模型。</div>
           <div class="callout bad"><strong>Stop</strong><br>W&B 未启动、QC 非严格通过、autopilot baseline 失败、或 `sim_delta_s` 出现外部 tick 跳变。</div>
           <div class="callout"><strong>Scale</strong><br>只有 steering-enabled 目标呈 capacity-limited 时，才继续跑更大 ViT。</div>

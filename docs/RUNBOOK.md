@@ -84,6 +84,7 @@ Observed first-pass result:
 
 - Tiny: `batch_size=192` was viable; `256` OOMed.
 - Small: `batch_size=128` passed with about `24.06GB` peak allocated VRAM.
+- Latest small delta/pred-aux probe: `batch_size=128` OOMed, `96` passed with `18.139GB` peak allocated VRAM under the current remote load.
 
 ## Phase 4: W&B Training
 
@@ -100,17 +101,30 @@ python -m carla_lewm_drive.driving_lewm.train \
   --run-name d0_tiny_h3_fs5_fast_e5
 ```
 
-Small 5-epoch comparison run:
+Tiny delta-progress + predicted-aux run:
+
+```bash
+python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_tiny.yaml \
+  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
+  --batch-size 192 \
+  --num-workers 2 \
+  --max-epochs 5 \
+  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_e5 \
+  --run-name d0_tiny_h3_fs5_delta_predaux_e5
+```
+
+Small delta-progress + predicted-aux run:
 
 ```bash
 python -m carla_lewm_drive.driving_lewm.train \
   --config configs/train_small.yaml \
   --dataset-path data/d0_train/carla_d0_train_fast.h5 \
-  --batch-size 128 \
+  --batch-size 96 \
   --num-workers 2 \
   --max-epochs 5 \
-  --output-dir outputs/d0_small_h3_fs5_fast_e5 \
-  --run-name d0_small_h3_fs5_fast_e5
+  --output-dir outputs/d0_small_h3_fs5_delta_predaux_e5 \
+  --run-name d0_small_h3_fs5_delta_predaux_e5
 ```
 
 Gate:
@@ -145,15 +159,17 @@ Then run the validated simplified model-policy target:
 ```bash
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d0_throttle_only.yaml \
-  --checkpoint outputs/d0_tiny_h3_fs5_fast_e5/best.pt \
-  --output-dir outputs/d0_eval_tiny_throttle_only_150m
+  --checkpoint outputs/d0_tiny_h3_fs5_delta_predaux_e5/best.pt \
+  --route-cap-m 190 \
+  --output-dir outputs/d0_eval_tiny_delta_predaux_throttle_only_190m
 ```
 
 Gate:
 
 - Autopilot must score 100m IFD on the short route.
-- A model checkpoint must reach at least 150m IFD with no hard infraction on the throttle-only D0 target before steering is re-enabled.
+- A model checkpoint must reach at least 190m IFD with no hard infraction on the throttle-only D0 target before longer runs are attempted.
 - A 200m throttle-only run must pass before longer 500m evaluation.
+- A steering-safe 150m run must pass before claiming steering recovery.
 
 Observed valid result:
 
@@ -161,8 +177,12 @@ Observed valid result:
 - Tiny and small both passed 150m throttle-only on isolated CARLA port 2100.
 - Tiny failed the 200m throttle-only run at 191.11m IFD by off-road.
 - Small failed the 200m throttle-only run at 191.87m IFD by off-road.
+- Latest tiny delta/pred-aux passed 150m and 190m throttle-only, then failed the 200m throttle-only run at 191.75m IFD by off-road.
+- Latest tiny delta/pred-aux failed the steering-safe 150m run at 107.63m IFD by off-road.
+- Latest small delta/pred-aux passed 190m throttle-only, then failed the 200m throttle-only run at 191.67m IFD by off-road.
+- Latest small delta/pred-aux failed the steering-safe 150m run at 103.42m IFD by off-road.
 - Earlier port-2000 model-policy outputs were invalidated because an external HIL client was ticking CARLA during model inference.
 
 ## Stop Rule
 
-Do not spend more time on larger ViTs until steering/action-objective calibration is fixed. The next useful experiment is a steering-safe policy or delta-progress planner objective, not `base` model training.
+Do not spend more time on larger ViTs until steering/lane keeping is fixed. Delta-progress and predicted-aux are now tested on tiny and small; the current useful work is steering-safe calibration before any 500m run.

@@ -4,9 +4,9 @@ Last checked: 2026-05-22 Asia/Shanghai.
 
 ## Verdict
 
-The first strict D0 pass is complete end to end: clean CARLA data was collected, QC passed, tiny and small LeWM variants were trained with W&B, and closed-loop CARLA evaluation now has timing guards against external simulator ticks.
+The first strict D0 pass is complete end to end: clean CARLA data was collected, QC passed, tiny and small historical LeWM variants were trained with W&B, a tiny delta-progress + predicted-aux variant was trained, and closed-loop CARLA evaluation now has timing guards against external simulator ticks.
 
-The current valid success claim is intentionally narrow: on an isolated CARLA server and a throttle-only D0 target, both tiny and small checkpoints reach 150m with no hard infractions. At 200m, both fail near 191m by off-road. The next gate is steering/action-objective calibration, not another blind ViT size increase.
+The current valid success claim is intentionally narrow: on an isolated CARLA server and a throttle-only D0 target, the latest tiny and small delta/pred-aux checkpoints reach 190m with no hard infractions. At 200m they fail by off-road at 191.75m and 191.67m, and steering-safe 150m still fails at 107.63m and 103.42m. The next gate is fixing steering/lane keeping before any 500m run.
 
 ## Repository And Environment
 
@@ -32,15 +32,18 @@ Notes:
 
 ## Training Evidence
 
-| Run | Model | Batch | W&B | Best Val Loss | Test Loss | Test Pred Loss | Test Aux Loss |
-|---|---|---:|---|---:|---:|---:|---:|
-| `d0_tiny_h3_fs5_fast_e5` | ViT tiny | 192 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_fast_e5-20260522-014214-db1cb3e1) | 2.9568 | 2.9620 | 0.7015 | 10.9257 |
-| `d0_small_h3_fs5_fast_e5` | ViT small | 128 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e) | 1.1281 | 1.1324 | 0.5269 | 2.6708 |
+| Run | Model | Batch | W&B | Objective | Best Val Loss | Test Loss | Test Pred Loss | Test Aux Loss | Test Pred-Aux Loss |
+|---|---|---:|---|---|---:|---:|---:|---:|---:|
+| `d0_tiny_h3_fs5_fast_e5` | ViT tiny | 192 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_fast_e5-20260522-014214-db1cb3e1) | historical absolute progress | 2.9568 | 2.9620 | 0.7015 | 10.9257 | n/a |
+| `d0_small_h3_fs5_fast_e5` | ViT small | 128 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e) | historical absolute progress | 1.1281 | 1.1324 | 0.5269 | 2.6708 | n/a |
+| `d0_tiny_h3_fs5_delta_predaux_e5` | ViT tiny | 192 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_e5-20260522-042925-552fb819) | delta progress + predicted aux | 0.2156 | 0.2147 | 0.0625 | 0.1606 | 0.1025 |
+| `d0_small_h3_fs5_delta_predaux_e5` | ViT small | 96 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_delta_predaux_e5-20260522-054348-da4e9fd5) | delta progress + predicted aux | 0.3311 | 0.3300 | 0.1243 | 0.1600 | 0.1225 |
 
 Batch/resource notes:
 
 - Tiny batch probe selected `batch_size=192`; `batch_size=256` OOMed.
-- Small batch probe passed `batch_size=128` with peak allocated VRAM about `24.06GB`; live run used about `31GB` total GPU memory including overhead.
+- The latest small delta/pred-aux batch probe OOMed at `128` and passed `96` with `18.139GB` peak allocated VRAM, while the live run used about `26GB` total GPU memory including overhead and other active processes.
+- The small delta/pred-aux best checkpoint came from epoch 1; later validation losses were worse: epoch 2 `0.3721`, epoch 3 `0.7614`, epoch 4 `0.3587`, epoch 5 `0.3413`.
 - `num_workers=2` was selected after the fast HDF5 export improved loader behavior.
 
 ## Closed-Loop Evidence
@@ -48,10 +51,17 @@ Batch/resource notes:
 | Policy | Episodes | Route Cap | Planner | Mean IFD | Mini Score | Result |
 |---|---:|---:|---|---:|---:|---|
 | Autopilot baseline | 2 | 100m | CARLA autopilot | 100.00m | 100.0 | pass |
-| Tiny checkpoint | 1 | 150m | isolated port 2100, throttle-only CEM | 150.00m | 100.0 | pass |
-| Small checkpoint | 1 | 150m | isolated port 2100, throttle-only CEM | 150.00m | 100.0 | pass |
-| Tiny checkpoint | 1 | 200m | isolated port 2100, throttle-only CEM | 191.11m | 70.0 | failed off-road |
-| Small checkpoint | 1 | 200m | isolated port 2100, throttle-only CEM | 191.87m | 70.0 | failed off-road |
+| Historical tiny checkpoint | 1 | 150m | isolated port 2100, throttle-only CEM | 150.00m | 100.0 | pass |
+| Historical small checkpoint | 1 | 150m | isolated port 2100, throttle-only CEM | 150.00m | 100.0 | pass |
+| Historical tiny checkpoint | 1 | 200m | isolated port 2100, throttle-only CEM | 191.11m | 70.0 | failed off-road |
+| Historical small checkpoint | 1 | 200m | isolated port 2100, throttle-only CEM | 191.87m | 70.0 | failed off-road |
+| Tiny delta/pred-aux checkpoint | 1 | 150m | isolated port 2100, throttle-only CEM | 150.00m | 100.0 | pass |
+| Tiny delta/pred-aux checkpoint | 1 | 190m | isolated port 2100, throttle-only CEM | 190.00m | 100.0 | pass |
+| Tiny delta/pred-aux checkpoint | 1 | 200m | isolated port 2100, throttle-only CEM | 191.75m | 70.0 | failed off-road |
+| Tiny delta/pred-aux checkpoint | 1 | 150m | isolated port 2100, steering-safe CEM | 107.63m | 70.0 | failed off-road |
+| Small delta/pred-aux checkpoint | 1 | 190m | isolated port 2100, throttle-only CEM | 190.00m | 100.0 | pass |
+| Small delta/pred-aux checkpoint | 1 | 200m | isolated port 2100, throttle-only CEM | 191.67m | 70.0 | failed off-road |
+| Small delta/pred-aux checkpoint | 1 | 150m | isolated port 2100, steering-safe CEM | 103.42m | 70.0 | failed off-road |
 | Tiny checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 | Small checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 
@@ -59,7 +69,7 @@ Interpretation:
 
 - The autopilot baseline verifies that the route, CARLA world, and metric implementation are usable.
 - The valid model-policy results require an isolated CARLA server. The evaluator now records `sim_delta_s` and raises on external tick jumps.
-- The throttle-only target shows the model can sustain a simplified long-ish control loop. The 200m failures show that route-following still needs steering calibration.
+- The throttle-only target shows the model can sustain a simplified long-ish control loop up to 190m. The small ViT did not move the 200m boundary, and the steering-safe failures show that route-following still needs steering/lane-keeping calibration.
 
 ## Completed Code Work
 
@@ -68,13 +78,13 @@ Interpretation:
 - Added fast HDF5 export for random-access training.
 - Hardened training around batch probing, W&B run IDs/resume policy, local CSV fields, checkpoint selection, and CLI overrides.
 - Added CARLA closed-loop evaluator for autopilot, constant-action, and checkpoint policies, including short-eval CLI overrides, action traces, and CARLA timing guards.
-- Added tests for QC, training reliability, fast export, metrics, and closed-loop evaluator.
+- Added tests for QC, training reliability, fast export, metrics, closed-loop evaluator, and delta-progress/predicted-aux targets.
 
 ## Current Next Gate
 
-Before spending more GPU time on larger ViTs, fix the closed-loop steering/action pathway:
+The active next gate is to fix the closed-loop steering/action pathway:
 
-1. Replace absolute progress reward with a delta-progress or speed-tracking objective.
-2. Train or calibrate a predicted-aux head directly on predicted latents.
-3. Add a steering-safe action prior or behavior-cloning action head before re-enabling steering.
-4. Re-run 150m and 200m on isolated CARLA, then only attempt 500m after 200m passes without off-road.
+1. Keep delta-progress and predicted-aux as the current default objective.
+2. Add a stronger steering-safe action prior or behavior-cloning action head before re-enabling steering.
+3. Re-run 150m steering-safe and 200m throttle-only on isolated CARLA.
+4. Only attempt 500m after 200m passes without off-road.
