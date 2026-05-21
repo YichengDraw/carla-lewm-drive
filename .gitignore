@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+
+# CARLA, datasets, checkpoints, and local run artifacts
+data/
+datasets/
+outputs/
+artifacts/
+runs/
+wandb/
+*.h5
+*.hdf5
+*.ckpt
+*.pt
+*.pth
+*.mp4
+*.avi
+*.log
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini

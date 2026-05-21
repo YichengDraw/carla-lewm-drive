@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CARLA-LeWM 小规模长程驾驶项目规划</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --ink: #1d2433;
+      --muted: #657082;
+      --line: #d9dee7;
+      --accent: #0b6bcb;
+      --accent-2: #0f8a72;
+      --warn: #b96b00;
+      --bad: #b42318;
+      --good-bg: #e9f7f2;
+      --warn-bg: #fff4df;
+      --bad-bg: #fdeceb;
+      --shadow: 0 10px 28px rgba(21, 32, 54, 0.10);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--ink); line-height: 1.55; letter-spacing: 0; }
+    header { background: #152033; color: #fff; padding: 22px 28px; }
+    header h1 { margin: 0 0 6px; font-size: 24px; font-weight: 760; }
+    header p { margin: 0; color: #cbd5e1; max-width: 980px; }
+    .toolbar { position: sticky; top: 0; z-index: 20; display: flex; gap: 10px; align-items: center; padding: 10px 18px; background: rgba(255,255,255,.96); border-bottom: 1px solid var(--line); }
+    .toolbar input { width: min(360px, 45vw); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
+    button, .tab { border: 1px solid var(--line); background: #fff; color: var(--ink); padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    button:hover, .tab.active { border-color: var(--accent); color: var(--accent); }
+    .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; max-width: 1240px; margin: 0 auto; padding: 18px; }
+    nav { position: sticky; top: 58px; align-self: start; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 12px; }
+    nav a { display: block; color: var(--ink); text-decoration: none; padding: 7px 8px; border-radius: 6px; font-size: 14px; }
+    nav a:hover { background: #eef5ff; color: var(--accent); }
+    main { display: grid; gap: 16px; }
+    section, details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 16px; }
+    section h2, details h2 { margin: 0 0 10px; font-size: 18px; }
+    details summary { cursor: pointer; font-weight: 720; font-size: 17px; }
+    .metrics { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 10px; }
+    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; }
+    .metric strong { display: block; font-size: 18px; }
+    .metric span { color: var(--muted); font-size: 13px; }
+    .callout { border-left: 4px solid var(--warn); background: var(--warn-bg); padding: 10px 12px; border-radius: 6px; margin-top: 12px; }
+    .ok { border-left-color: var(--accent-2); background: var(--good-bg); }
+    .bad { border-left-color: var(--bad); background: var(--bad-bg); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 8px; vertical-align: top; }
+    th { background: #f1f4f8; }
+    code { background: #eef2f7; padding: 1px 5px; border-radius: 4px; }
+    pre { overflow: auto; background: #101827; color: #d9e7ff; padding: 12px; border-radius: 8px; }
+    .tag { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+    .tag.good { color: #0f6b50; border-color: #b7e4d4; background: #e9f7f2; }
+    .tag.warn { color: #8a4d00; border-color: #f1cf8a; background: #fff4df; }
+    .tag.bad { color: #9f241a; border-color: #f2b8b5; background: #fdeceb; }
+    mark.search-hit { background: #fff08a; padding: 0 2px; }
+    mark.current-hit { outline: 2px solid #f59e0b; }
+    .hidden-kind { display: none; }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: static; }
+      .metrics, .grid { grid-template-columns: 1fr; }
+      .toolbar { flex-wrap: wrap; }
+      .toolbar input { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CARLA-LeWM 小规模长程驾驶项目规划</h1>
+    <p>先把驾驶任务压到模型可学、可验证的范围，再用逐帧数据质量、W&B 曲线和闭环驾驶距离决定是否扩大模型或场景。</p>
+  </header>
+  <div class="toolbar">
+    <input id="search" placeholder="搜索 phase / LeWM / W&B / QC / tiny">
+    <button id="prev" type="button">&lt;</button>
+    <button id="next" type="button">&gt;</button>
+    <span id="count" class="tag">0</span>
+    <button class="tab active" data-filter="all" type="button">全部</button>
+    <button class="tab" data-filter="data" type="button">数据</button>
+    <button class="tab" data-filter="train" type="button">训练</button>
+    <button class="tab" data-filter="eval" type="button">评估</button>
+    <button class="tab" data-filter="risk" type="button">风险</button>
+  </div>
+  <div class="layout">
+    <nav>
+      <a href="#verdict">当前结论</a>
+      <a href="#terms">名词速查</a>
+      <a href="#decoder">实验名解码</a>
+      <a href="#phases">阶段计划</a>
+      <a href="#metrics">指标</a>
+      <a href="#commands">命令</a>
+      <a href="#gates">Go / No-Go</a>
+    </nav>
+    <main id="content">
+      <section id="verdict" data-kind="all">
+        <h2>当前结论</h2>
+        <div class="metrics">
+          <div class="metric"><span>Phase</span><strong>0-1</strong><span>代码和 D0-smoke 门控</span></div>
+          <div class="metric"><span>Model</span><strong>ViT tiny</strong><span>失败后才升 small</span></div>
+          <div class="metric"><span>Data QC</span><strong>逐帧</strong><span>HDF5 + contact sheet</span></div>
+          <div class="metric"><span>W&B</span><strong>必开</strong><span>serious run 启动即记录</span></div>
+          <div class="metric"><span>GPU</span><strong>5090</strong><span>训练默认远端</span></div>
+        </div>
+        <div class="callout">
+          当前状态：项目骨架已定义；真实采集需要 CARLA 0.9.16 server 和匹配 Python API；训练需要生成并通过 QC 的 D0 数据集。
+        </div>
+      </section>
+
+      <section id="terms" data-kind="all">
+        <h2>名词速查</h2>
+        <table>
+          <tr><th>Term</th><th>解释</th></tr>
+          <tr><td><code>CARLA</code></td><td>自动驾驶仿真器，用来生成相机、车辆控制、车道、碰撞和红灯事件数据。</td></tr>
+          <tr><td><code>LeWM</code></td><td>LeWorldModel，端到端从图像学习 latent dynamics 的世界模型。</td></tr>
+          <tr><td><code>ViT tiny / small / base</code></td><td>视觉 Transformer 编码器大小；tiny 是主线，small 是 capacity 失败后的升级。</td></tr>
+          <tr><td><code>W&B</code></td><td>Weights & Biases，用于训练曲线、验证指标、视频和配置记录。</td></tr>
+          <tr><td><code>QC</code></td><td>Quality Control，逐帧检查数据是否缺帧、空白、动作异常或事件标签不可信。</td></tr>
+          <tr><td><code>closed-loop eval</code></td><td>模型真实控制 CARLA 车辆，不只是离线 loss。</td></tr>
+          <tr><td><code>Infraction-Free Distance</code></td><td>首次碰撞、离路、闯红灯、停死前的行驶距离，单位米。</td></tr>
+          <tr><td><code>Mini Driving Score</code></td><td>路线完成度乘以违规惩罚，借鉴 CARLA Leaderboard 的评估思路。</td></tr>
+          <tr><td><code>D0 / D1 / D2</code></td><td>D0 单车低速白天；D1 低密交通；D2 held-out 路线/随机种子。</td></tr>
+          <tr><td><code>CEM</code></td><td>Cross-Entropy Method，采样多条动作序列并选择低 cost 的规划器。</td></tr>
+        </table>
+      </section>
+
+      <section id="decoder" data-kind="train">
+        <h2>实验名解码</h2>
+        <p><code>d0_tiny_h3_fs5</code>：D0 简化场景、ViT tiny、3 帧历史、每 5 个 CARLA 原始帧合成一个模型动作步。</p>
+        <table>
+          <tr><th>片段</th><th>含义</th></tr>
+          <tr><td><code>d0</code></td><td>单车、白天、干燥、低速路线。</td></tr>
+          <tr><td><code>tiny</code></td><td>最小 ViT 主线，优先证明小模型是否能学。</td></tr>
+          <tr><td><code>h3</code></td><td>模型输入 3 个历史视觉状态。</td></tr>
+          <tr><td><code>fs5</code></td><td>CARLA 20Hz 原始控制每 5 帧合并，模型步长约 0.25s。</td></tr>
+        </table>
+      </section>
+
+      <section id="phases" data-kind="all">
+        <h2>阶段计划</h2>
+        <details open data-kind="data"><summary>Phase 0：环境和仓库门控 <span class="tag warn">current</span></summary>
+          <p>目标：确认独立 GitHub repo、CARLA 0.9.16、Python API、W&B、5090、磁盘和配置路径。</p>
+          <p>退出条件：<code>carla-lewm-build-html</code>、<code>carla-lewm-qc --help</code>、<code>carla-lewm-train --help</code> 可运行；远端 5090 和 W&B 状态被记录。</p>
+        </details>
+        <details open data-kind="data"><summary>Phase 1：D0-smoke 采集和逐帧 QC <span class="tag warn">gate</span></summary>
+          <p>目标：采 20 条 30 秒单车路线，生成 HDF5、recorder log、contact sheet、逐帧 QC JSON。</p>
+          <p>退出条件：0 hard QC issue、expert hard infraction 接近 0、人工逐帧抽查能确认画面/动作/事件标签一致。</p>
+        </details>
+        <details data-kind="train"><summary>Phase 2：batch sweep 和 tiny smoke <span class="tag">planned</span></summary>
+          <p>目标：按 <code>256 -> 192 -> 128 -> 96 -> 64</code> 找到最大稳定 batch，确认 5090 没有明显浪费。</p>
+          <p>退出条件：batch probe 写入 JSON，tiny smoke 有下降的 train/val loss，W&B 曲线和本地 CSV 同步存在。</p>
+        </details>
+        <details data-kind="train"><summary>Phase 3：tiny 主训练和闭环选择 <span class="tag">planned</span></summary>
+          <p>目标：每 5 epoch 做验证，按 closed-loop <code>Infraction-Free Distance</code> 选 best checkpoint。</p>
+          <p>退出条件：held-out D0 median 距离达到 300m 或失败原因被归类为数据、cost、planner、capacity。</p>
+        </details>
+        <details data-kind="train"><summary>Phase 4：small 升级门控 <span class="tag">conditional</span></summary>
+          <p>目标：只有 tiny 显示 capacity-limited 时，使用同协议训练 small。</p>
+          <p>退出条件：small 在相同 D0 manifest 上带来稳定闭环提升，否则停止扩大模型。</p>
+        </details>
+        <details data-kind="eval"><summary>Phase 5：D1 低密交通 <span class="tag">conditional</span></summary>
+          <p>目标：加入少量车辆、无行人、保持低速，检查模型是否维持长程安全。</p>
+          <p>退出条件：报告 per-km infractions、路线完成度和失败视频。</p>
+        </details>
+      </section>
+
+      <section id="metrics" data-kind="eval">
+        <h2>指标</h2>
+        <table>
+          <tr><th>指标</th><th>定义</th><th>读法</th></tr>
+          <tr><td><code>Infraction-Free Distance</code></td><td>首次 hard infraction 前累计米数，cap 为路线长度。</td><td>越高越好，是主指标。</td></tr>
+          <tr><td><code>Mini Driving Score</code></td><td>路线完成百分比乘 collision/offroad/red-light/blocked 惩罚。</td><td>越高越好，防止只停车不撞。</td></tr>
+          <tr><td><code>val/pred_loss</code></td><td>预测下一 latent 的 MSE。</td><td>越低越好，但不能单独证明能开车。</td></tr>
+          <tr><td><code>QC hard issues</code></td><td>缺 key、缺帧、空白帧、非有限 action 等硬错误。</td><td>必须为 0 才进入训练。</td></tr>
+        </table>
+      </section>
+
+      <section id="commands" data-kind="all">
+        <h2>命令</h2>
+        <pre><code class="language-bash">pip install -r requirements.txt
+pip install -e .
+
+carla-lewm-build-html --output interactive_plan.html
+carla-lewm-collect --config configs/d0_smoke.yaml --episodes 2 --seconds 5
+carla-lewm-qc --dataset data/d0_smoke/carla_d0_smoke.h5 --out-dir outputs/qc_d0_smoke --strict
+carla-lewm-train --config configs/train_tiny.yaml --batch-probe
+carla-lewm-train --config configs/train_tiny.yaml
+carla-lewm-eval --config configs/eval_d0.yaml --checkpoint outputs/d0_tiny_h3_fs5/best.pt</code></pre>
+      </section>
+
+      <section id="gates" data-kind="risk">
+        <h2>Go / No-Go</h2>
+        <div class="grid">
+          <div class="callout ok"><strong>Continue</strong><br>QC hard issues 为 0，tiny 离线 loss 下降，expert baseline 正常，held-out D0 闭环距离持续提升。</div>
+          <div class="callout"><strong>Pause</strong><br>训练 loss 下降但 closed-loop 无提升，优先查 cost 和 planner，不直接扩大模型。</div>
+          <div class="callout bad"><strong>Stop</strong><br>数据逐帧异常、W&B 未启动、评估 manifest 不一致、或 CARLA expert baseline 本身失败。</div>
+          <div class="callout"><strong>Scale</strong><br>tiny 通过所有 sanity 但明显 capacity-limited 时，才跑 small；base 不作为主线。</div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const content = document.getElementById('content');
+    const search = document.getElementById('search');
+    const count = document.getElementById('count');
+    let hits = [];
+    let current = -1;
+
+    function clearMarks() {
+      content.querySelectorAll('mark.search-hit').forEach(mark => {
+        const text = document.createTextNode(mark.textContent);
+        mark.replaceWith(text);
+      });
+      content.normalize();
+    }
+    function markText(node, query) {
+      const text = node.nodeValue;
+      const lower = text.toLowerCase();
+      const q = query.toLowerCase();
+      let index = lower.indexOf(q);
+      if (index < 0) return;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      while (index >= 0) {
+        frag.appendChild(document.createTextNode(text.slice(last, index)));
+        const mark = document.createElement('mark');
+        mark.className = 'search-hit';
+        mark.textContent = text.slice(index, index + query.length);
+        frag.appendChild(mark);
+        last = index + query.length;
+        index = lower.indexOf(q, last);
+      }
+      frag.appendChild(document.createTextNode(text.slice(last)));
+      node.replaceWith(frag);
+    }
+    function doSearch() {
+      clearMarks();
+      const q = search.value.trim();
+      hits = [];
+      current = -1;
+      if (!q) { count.textContent = '0'; return; }
+      const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          if (!node.nodeValue.toLowerCase().includes(q.toLowerCase())) return NodeFilter.FILTER_REJECT;
+          if (node.parentElement && ['SCRIPT', 'STYLE', 'MARK'].includes(node.parentElement.tagName)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(node => markText(node, q));
+      hits = Array.from(content.querySelectorAll('mark.search-hit'));
+      count.textContent = String(hits.length);
+      jump(0);
+    }
+    function jump(delta) {
+      if (!hits.length) return;
+      if (current >= 0) hits[current].classList.remove('current-hit');
+      current = (current + delta + hits.length) % hits.length;
+      hits[current].classList.add('current-hit');
+      hits[current].scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
+    let timer = null;
+    search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(doSearch, 100); });
+    document.getElementById('prev').addEventListener('click', () => jump(-1));
+    document.getElementById('next').addEventListener('click', () => jump(1));
+    document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const filter = tab.dataset.filter;
+      document.querySelectorAll('[data-kind]').forEach(el => {
+        const kind = el.dataset.kind;
+        el.classList.toggle('hidden-kind', filter !== 'all' && kind !== filter && kind !== 'all');
+      });
+    }));
+  </script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "carla-lewm-drive"
+version = "0.1.0"
+description = "CARLA data collection, quality control, and compact LeWM training for simple long-horizon driving."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+  "numpy>=1.26",
+  "h5py>=3.10",
+  "pillow>=10.0",
+  "PyYAML>=6.0",
+  "tqdm>=4.66",
+  "imageio>=2.34",
+  "scikit-learn>=1.4",
+  "torch>=2.3",
+  "torchvision>=0.18",
+  "transformers>=4.40",
+]
+
+[project.optional-dependencies]
+tracking = ["wandb>=0.17"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+carla-lewm-collect = "carla_lewm_drive.carla_collect.collect_dataset:main"
+carla-lewm-qc = "carla_lewm_drive.dataset_qc.validate_hdf5:main"
+carla-lewm-train = "carla_lewm_drive.driving_lewm.train:main"
+carla-lewm-eval = "carla_lewm_drive.closed_loop_eval.evaluate:main"
+carla-lewm-build-html = "carla_lewm_drive.html_report.build_interactive_plan:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

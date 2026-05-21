@@ -1,0 +1,37 @@
+scenario:
+  label: D0-smoke
+  description: Single-ego daytime dry-road collection for pipeline validation.
+  carla_version: 0.9.16
+  host: 127.0.0.1
+  port: 2000
+  timeout_s: 10.0
+  town: Town03
+  fixed_delta_seconds: 0.05
+  synchronous_mode: true
+  traffic_manager_port: 8000
+  traffic_manager_seed: 20260521
+  vehicles: 0
+  walkers: 0
+  weather: ClearNoon
+  spawn_point_indices: [0, 3, 7, 11]
+  episodes: 20
+  episode_seconds: 30.0
+  target_speed_kmh: 20.0
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+output:
+  dataset_path: data/d0_smoke/carla_d0_smoke.h5
+  metadata_path: data/d0_smoke/metadata.json
+  recorder_path: data/d0_smoke/carla_d0_smoke.log
+  preview_dir: data/d0_smoke/previews

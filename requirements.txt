@@ -1,0 +1,15 @@
+numpy>=1.26
+h5py>=3.10
+pillow>=10.0
+PyYAML>=6.0
+tqdm>=4.66
+imageio>=2.34
+scikit-learn>=1.4
+torch>=2.3
+torchvision>=0.18
+transformers>=4.40
+wandb>=0.17
+pytest>=8.0
+
+# Install the CARLA Python API wheel that exactly matches the simulator server.
+# For this project the planned server version is CARLA 0.9.16.

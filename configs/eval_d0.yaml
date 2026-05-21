@@ -1,0 +1,32 @@
+eval:
+  label: d0_heldout_longdrive
+  dataset_path: data/d0_train/carla_d0_train.h5
+  checkpoint_path: outputs/d0_tiny_h3_fs5/best.pt
+  output_dir: outputs/d0_eval
+  host: 127.0.0.1
+  port: 2000
+  town: Town03
+  fixed_delta_seconds: 0.05
+  weather: ClearNoon
+  route_spawn_indices: [2, 5, 13, 17, 29]
+  route_cap_m: 500.0
+  target_speed_kmh: 20.0
+  max_episode_seconds: 120.0
+  eval_episodes: 20
+
+planner:
+  horizon: 8
+  receding_horizon: 1
+  num_samples: 512
+  elite_frac: 0.1
+  iterations: 4
+  action_std: [0.25, 0.35, 0.20]
+  cost:
+    progress_reward: 1.0
+    lane_offset_penalty: 2.0
+    heading_penalty: 0.5
+    speed_error_penalty: 0.25
+    collision_penalty: 100.0
+    offroad_penalty: 60.0
+    red_light_penalty: 80.0
+    action_smoothness_penalty: 0.05

@@ -1,0 +1,37 @@
+scenario:
+  label: D0-train
+  description: Simple single-ego training dataset with route variation.
+  carla_version: 0.9.16
+  host: 127.0.0.1
+  port: 2000
+  timeout_s: 10.0
+  town: Town03
+  fixed_delta_seconds: 0.05
+  synchronous_mode: true
+  traffic_manager_port: 8000
+  traffic_manager_seed: 20260522
+  vehicles: 0
+  walkers: 0
+  weather: ClearNoon
+  spawn_point_indices: [0, 3, 7, 11, 15, 19, 23, 31]
+  episodes: 160
+  episode_seconds: 40.0
+  target_speed_kmh: 20.0
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+output:
+  dataset_path: data/d0_train/carla_d0_train.h5
+  metadata_path: data/d0_train/metadata.json
+  recorder_path: data/d0_train/carla_d0_train.log
+  preview_dir: data/d0_train/previews
