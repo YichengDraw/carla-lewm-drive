@@ -106,8 +106,14 @@ class CEMPlanner:
     def __init__(self, cfg: dict[str, Any], bounds: DrivingActionBounds | None = None) -> None:
         self.cfg = cfg
         self.bounds = bounds or DrivingActionBounds()
-        self.low = np.asarray(self.bounds.low, dtype=np.float32)
-        self.high = np.asarray(self.bounds.high, dtype=np.float32)
+        self.low = np.asarray(cfg.get("action_low", self.bounds.low), dtype=np.float32)
+        self.high = np.asarray(cfg.get("action_high", self.bounds.high), dtype=np.float32)
+        self.low = np.maximum(self.low, np.asarray(self.bounds.low, dtype=np.float32))
+        self.high = np.minimum(self.high, np.asarray(self.bounds.high, dtype=np.float32))
+        if self.low.shape != (3,) or self.high.shape != (3,):
+            raise ValueError("planner.action_low/action_high must each contain [throttle, steer, brake]")
+        if np.any(self.low > self.high):
+            raise ValueError(f"Invalid planner action bounds: low={self.low.tolist()} high={self.high.tolist()}")
         self.rng = np.random.default_rng(int(cfg.get("seed", 0)))
         self.target_speed_mps = float(cfg.get("target_speed_mps", 20.0 / 3.6))
 
@@ -118,18 +124,30 @@ class CEMPlanner:
         elite = max(1, int(num_samples * float(self.cfg["elite_frac"])))
         mean = np.tile(np.asarray(self.cfg.get("action_mean", [0.35, 0.0, 0.0]), dtype=np.float32), (horizon, 1))
         std = np.tile(np.asarray(self.cfg["action_std"], dtype=np.float32), (horizon, 1))
+        mean = np.clip(mean, self.low.reshape(1, 3), self.high.reshape(1, 3))
         min_std = float(self.cfg.get("min_action_std", 1e-4))
         best = mean[0].copy()
         for _ in range(iterations):
             samples = self.rng.normal(mean, std, size=(num_samples, horizon, 3)).astype(np.float32)
             samples = np.clip(samples, self.low.reshape(1, 1, 3), self.high.reshape(1, 1, 3))
+            samples = self._sanitize_samples(samples)
             scores = self.score_samples(model, pixels, history_actions, samples, device)
             elite_idx = np.argsort(scores)[:elite]
             elite_samples = samples[elite_idx]
             mean = elite_samples.mean(axis=0)
             std = np.maximum(elite_samples.std(axis=0), min_std)
             best = samples[int(np.argmin(scores)), 0].copy()
-        return np.clip(best, self.low, self.high).astype(np.float32)
+        return self._sanitize_samples(np.clip(best, self.low, self.high).reshape(1, 1, 3))[0, 0].astype(np.float32)
+
+    def _sanitize_samples(self, samples: np.ndarray) -> np.ndarray:
+        samples = np.asarray(samples, dtype=np.float32).copy()
+        if bool(self.cfg.get("exclusive_throttle_brake", False)):
+            throttle = samples[..., 0]
+            brake = samples[..., 2]
+            throttle_wins = throttle >= brake
+            samples[..., 2] = np.where(throttle_wins, 0.0, brake)
+            samples[..., 0] = np.where(throttle_wins, throttle, 0.0)
+        return samples
 
     def score_samples(
         self,
@@ -159,6 +177,8 @@ class CEMPlanner:
             speed, progress, lane_offset, heading, collision, offroad, red_light, blocked = aux.tolist()
             speed_error = abs(float(speed) - self.target_speed_mps)
             action_smooth = float(np.square(np.diff(actions, axis=0)).mean()) if len(actions) > 1 else 0.0
+            first_raw = np.asarray(actions[0], dtype=np.float32)
+            throttle_brake_conflict = float(first_raw[0] * first_raw[2])
             cost = (
                 -float(cost_cfg["progress_reward"]) * float(progress)
                 + float(cost_cfg["lane_offset_penalty"]) * abs(float(lane_offset))
@@ -169,6 +189,8 @@ class CEMPlanner:
                 + float(cost_cfg["red_light_penalty"]) * max(0.0, float(red_light))
                 + float(cost_cfg["blocked_penalty"]) * max(0.0, float(blocked))
                 + float(cost_cfg["action_smoothness_penalty"]) * action_smooth
+                + float(cost_cfg.get("brake_penalty", 0.0)) * float(first_raw[2])
+                + float(cost_cfg.get("throttle_brake_conflict_penalty", 0.0)) * throttle_brake_conflict
             )
             costs.append(cost)
         return np.asarray(costs, dtype=np.float32)
@@ -308,6 +330,29 @@ def write_metrics(output_dir: Path, rows: list[DrivingEpisodeMetrics]) -> dict[s
     summary = aggregate_metrics(rows)
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return summary
+
+
+def write_action_trace(output_dir: Path, episode_idx: int, rows: list[dict[str, float | int]]) -> Path | None:
+    if not rows:
+        return None
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"actions_episode_{episode_idx:03d}.csv"
+    fieldnames = [
+        "step",
+        "route_progress_m",
+        "speed_mps",
+        "throttle",
+        "steer",
+        "brake",
+        "offroad",
+        "blocked",
+        "collision_count",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
 
 
 def camera_transform(carla, cfg: dict[str, Any]):
@@ -497,6 +542,7 @@ def run_episode(
     acc = EpisodeAccumulator(route_length_m=route_length_m)
     actors = []
     frames: list[tuple[np.ndarray, str]] = []
+    action_trace: list[dict[str, float | int]] = []
     collision_events = {"count": 0}
     last_collision_count = 0
     blocked_seconds = 0.0
@@ -564,6 +610,7 @@ def run_episode(
                 previous_loc = loc
                 speed = vehicle_speed(ego)
                 _, _, offroad = lane_metrics(carla, world_map, transform)
+                control = ego.get_control()
 
                 current_collision_count = int(collision_events["count"])
                 acc.add_collision_events(current_collision_count - last_collision_count)
@@ -585,6 +632,20 @@ def run_episode(
                 acc.update_flag("offroad", bool(offroad))
                 acc.update_flag("red_light", red_light)
                 acc.update_flag("blocked", blocked)
+                if bool(eval_cfg.get("save_action_trace", True)):
+                    action_trace.append(
+                        {
+                            "step": int(step),
+                            "route_progress_m": float(acc.route_progress_m),
+                            "speed_mps": float(speed),
+                            "throttle": float(control.throttle),
+                            "steer": float(control.steer),
+                            "brake": float(control.brake),
+                            "offroad": int(bool(offroad)),
+                            "blocked": int(bool(blocked)),
+                            "collision_count": int(acc.collision_count),
+                        }
+                    )
                 maybe_store_frame(output_dir, frames, rgb, episode=episode_idx, step=step, eval_cfg=eval_cfg)
 
                 if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
@@ -616,6 +677,8 @@ def run_episode(
             except Exception:
                 pass
 
+    if bool(eval_cfg.get("save_action_trace", True)):
+        write_action_trace(output_dir, episode_idx, action_trace)
     return acc.to_metrics(), frames
 
 

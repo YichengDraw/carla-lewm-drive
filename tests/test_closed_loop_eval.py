@@ -10,6 +10,7 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     apply_cli_overrides,
     expand_action_to_model_dim,
     run_dry_eval,
+    write_action_trace,
     write_metrics,
 )
 from carla_lewm_drive.closed_loop_eval.metrics import DrivingEpisodeMetrics
@@ -80,6 +81,25 @@ def test_cem_score_samples_rejects_action_dim_mismatch():
         planner.score_samples(model, pixels, history_actions, samples, torch.device("cpu"))
 
 
+def test_cem_planner_applies_configured_bounds_and_exclusive_throttle_brake():
+    cfg = planner_cfg()
+    cfg.update(
+        {
+            "action_low": [0.2, -0.1, 0.0],
+            "action_high": [0.8, 0.1, 0.7],
+            "exclusive_throttle_brake": True,
+        }
+    )
+    planner = CEMPlanner(cfg)
+
+    samples = np.array([[[1.0, 0.2, 0.5], [0.1, -0.2, 0.6]]], dtype=np.float32)
+    clipped = np.clip(samples, planner.low.reshape(1, 1, 3), planner.high.reshape(1, 1, 3))
+    sanitized = planner._sanitize_samples(clipped)
+
+    assert sanitized[0, 0].tolist() == pytest.approx([0.8, 0.1, 0.0])
+    assert sanitized[0, 1].tolist() == pytest.approx([0.0, -0.1, 0.6])
+
+
 def test_write_metrics_outputs_episode_csv_and_summary(tmp_path):
     row = DrivingEpisodeMetrics(
         route_length_m=100.0,
@@ -96,6 +116,32 @@ def test_write_metrics_outputs_episode_csv_and_summary(tmp_path):
     assert rows[0]["route_completion_pct"] == "80.0"
     assert rows[0]["infraction_free_distance_m"] == "30.0"
     assert rows[0]["collision_count"] == "1"
+
+
+def test_write_action_trace_outputs_stepwise_control_csv(tmp_path):
+    path = write_action_trace(
+        tmp_path,
+        2,
+        [
+            {
+                "step": 1,
+                "route_progress_m": 0.5,
+                "speed_mps": 1.0,
+                "throttle": 0.4,
+                "steer": -0.01,
+                "brake": 0.0,
+                "offroad": 0,
+                "blocked": 0,
+                "collision_count": 0,
+            }
+        ],
+    )
+
+    assert path == tmp_path / "actions_episode_002.csv"
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["throttle"] == "0.4"
+    assert rows[0]["steer"] == "-0.01"
 
 
 def test_autopilot_dry_run_does_not_require_checkpoint(tmp_path):
