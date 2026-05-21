@@ -22,6 +22,7 @@ eval:
   blocked_speed_mps: 0.1
   blocked_seconds: 3.0
   blocked_grace_seconds: 5.0
+  max_sim_delta_multiplier: 2.5
   red_light_speed_threshold_mps: 0.2
   stop_on_collision: true
   stop_on_blocked: true

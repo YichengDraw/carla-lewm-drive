@@ -409,6 +409,11 @@ def wait_rgb(carla_world, image_queue, timeout_s: float) -> np.ndarray:
 
 
 def wait_rgb_packet(carla_world, image_queue, timeout_s: float) -> tuple[np.ndarray, int, float]:
+    while True:
+        try:
+            image_queue.get_nowait()
+        except queue.Empty:
+            break
     frame_id = carla_world.tick()
     image = image_queue.get(timeout=timeout_s)
     while image.frame < frame_id:
@@ -582,12 +587,13 @@ def run_episode(
             if model is None or planner is None:
                 raise ValueError("Model policy requires both model and planner")
             idle_action = np.asarray(eval_cfg.get("model_warmup_action", [0.0, 0.0, 1.0]), dtype=np.float32)
+            frameskip = action_dim_to_frameskip(int(model.cfg.action_dim))
             for _ in range(int(model.cfg.history_size)):
-                ego.apply_control(to_vehicle_control(carla, idle_action))
-                rgb = wait_rgb(world, image_queue, timeout_s)
+                for _raw_step in range(frameskip):
+                    ego.apply_control(to_vehicle_control(carla, idle_action))
+                    rgb = wait_rgb(world, image_queue, timeout_s)
                 image_history.append(rgb)
                 action_history.append(expand_action_to_model_dim(idle_action, int(model.cfg.action_dim)))
-            frameskip = action_dim_to_frameskip(int(model.cfg.action_dim))
         else:
             frameskip = 1
             wait_rgb(world, image_queue, timeout_s)
@@ -618,6 +624,14 @@ def run_episode(
                 wall_time = time.perf_counter()
                 latest_rgb = rgb
                 step += 1
+                sim_delta = 0.0 if last_sim_time is None else sim_time - last_sim_time
+                max_sim_delta = float(eval_cfg.get("max_sim_delta_multiplier", 2.5)) * fixed_delta
+                if last_sim_time is not None and sim_delta > max_sim_delta:
+                    raise RuntimeError(
+                        "External CARLA ticking detected during evaluation: "
+                        f"sim_delta_s={sim_delta:.3f}, expected <= {max_sim_delta:.3f}. "
+                        "Use an isolated CARLA port/server for closed-loop model eval."
+                    )
 
                 transform = ego.get_transform()
                 loc = transform.location
@@ -653,7 +667,7 @@ def run_episode(
                             "step": int(step),
                             "carla_frame": int(frame_id),
                             "sim_time_s": float(sim_time),
-                            "sim_delta_s": float(0.0 if last_sim_time is None else sim_time - last_sim_time),
+                            "sim_delta_s": float(sim_delta),
                             "wall_delta_s": float(0.0 if last_wall_time is None else wall_time - last_wall_time),
                             "route_progress_m": float(acc.route_progress_m),
                             "speed_mps": float(speed),
