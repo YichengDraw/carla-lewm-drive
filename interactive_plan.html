@@ -106,11 +106,11 @@
           <div class="metric"><span>Phase</span><strong>D0 pass</strong><span>采集、QC、训练、短评估完成</span></div>
           <div class="metric"><span>Dataset</span><strong>48k</strong><span>D0-train 严格 QC 通过</span></div>
           <div class="metric"><span>Best offline</span><strong>small</strong><span>test/loss 1.1324</span></div>
-          <div class="metric"><span>Best closed-loop</span><strong>tiny</strong><span>IFD 14.10m，但失败</span></div>
-          <div class="metric"><span>Next</span><strong>planner</strong><span>先修动作/目标/规划</span></div>
+          <div class="metric"><span>Best closed-loop</span><strong>150m</strong><span>tiny/small throttle-only 通过</span></div>
+          <div class="metric"><span>Next</span><strong>steering</strong><span>修动作目标和转向规划</span></div>
         </div>
-        <div class="callout bad">
-          当前状态：数据和训练流水线可信，但模型闭环驾驶还没有成功。small 离线 loss 更低，却在短程 CARLA sanity eval 里 blocked，所以继续放大 ViT 不是下一步。
+        <div class="callout ok">
+          当前状态：数据和训练流水线可信；在隔离 CARLA 2100 端口和 throttle-only 简化目标下，tiny/small 都能 150m 无 hard infraction。200m 边界约 191m，下一步是转向/action objective 校准。
         </div>
       </section>
 
@@ -126,6 +126,8 @@
           <tr><td><code>IFD</code></td><td>Infraction-Free Distance，首次 hard infraction 前的行驶距离，越高越好。</td></tr>
           <tr><td><code>Mini Driving Score</code></td><td>路线完成度乘违规惩罚，用来防止只看是否开到终点。</td></tr>
           <tr><td><code>CEM64</code></td><td>Cross-Entropy Method 规划器，64 个动作样本、2 次迭代、horizon 4，用于短程 sanity eval。</td></tr>
+          <tr><td><code>throttle-only</code></td><td>当前有效简化目标：只允许模型选择油门，steer/brake 固定为 0，用来验证最小闭环能力。</td></tr>
+          <tr><td><code>sim_delta_s</code></td><td>相邻控制 tick 的 CARLA 仿真时间差；过大说明有外部客户端推进世界，评估应判无效。</td></tr>
           <tr><td><code>D0</code></td><td>单车、白天、固定简化路线、强约束质量门控，是第一阶段最简单数据分布。</td></tr>
         </table>
       </section>
@@ -167,7 +169,7 @@
             <td>ViT small</td><td>128</td><td>val 1.1281<br>test 1.1324<br>pred 0.5269</td><td><div class="bar"><span style="width: 75%"></span></div>离线 loss 更好，但闭环直接 blocked。</td>
           </tr>
         </table>
-        <div class="callout">当前结论：W&B 曲线和 test loss 只能证明离线拟合变好，不能单独证明闭环控制成功。</div>
+        <div class="callout">当前结论：W&B 曲线和 test loss 只能证明离线拟合变好。small loss 更低，但没有把 throttle-only 200m 边界推过 200m。</div>
       </section>
 
       <section id="eval" data-kind="eval">
@@ -175,10 +177,12 @@
         <table>
           <tr><th>Policy</th><th>配置</th><th>IFD</th><th>Mini Score</th><th>结论</th></tr>
           <tr><td>Autopilot baseline</td><td>2 episodes, 100m cap</td><td>100.00m</td><td>100.0</td><td><span class="tag good">pass</span> 环境和指标可信。</td></tr>
-          <tr><td>tiny checkpoint</td><td>1 episode, 50m cap, CEM64</td><td>14.10m</td><td>49.0</td><td><span class="tag bad">fail</span> 能移动，但离路。</td></tr>
-          <tr><td>small checkpoint</td><td>1 episode, 50m cap, CEM64</td><td>0.007m</td><td>0.011</td><td><span class="tag bad">fail</span> 基本停住，被 blocked。</td></tr>
+          <tr><td>tiny checkpoint</td><td>150m cap, isolated port 2100, throttle-only</td><td>150.00m</td><td>100.0</td><td><span class="tag good">pass</span> 当前最小有效闭环结果。</td></tr>
+          <tr><td>small checkpoint</td><td>150m cap, isolated port 2100, throttle-only</td><td>150.00m</td><td>100.0</td><td><span class="tag good">pass</span> 和 tiny 持平。</td></tr>
+          <tr><td>tiny checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.11m</td><td>70.0</td><td><span class="tag warn">boundary</span> 近终点 off-road。</td></tr>
+          <tr><td>small checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.87m</td><td>70.0</td><td><span class="tag warn">boundary</span> 更大 ViT 没有解决边界。</td></tr>
         </table>
-        <div class="callout bad">当前门控：模型必须在同一短程 sanity eval 上达到至少 50m IFD，才值得跑 500m 长程评估。</div>
+        <div class="callout">有效性说明：早期 port 2000 model eval 被外部 HIL client tick 污染；当前 evaluator 已写 action/timing trace，并在 `sim_delta_s` 过大时 fail。</div>
       </section>
 
       <section id="phases" data-kind="all">
@@ -191,12 +195,12 @@
           <p>目标：先 tiny，再在 tiny 闭环不理想后尝试 small；全程 W&B 记录。</p>
           <p>结果：small 离线 loss 更低，但闭环更差；模型大小不是当前主瓶颈。</p>
         </details>
-        <details open data-kind="eval"><summary>Phase 4：短程闭环 sanity <span class="tag bad">blocked</span></summary>
+        <details open data-kind="eval"><summary>Phase 4：简化闭环 sanity <span class="tag good">150m pass</span></summary>
           <p>目标：用 IFD 和 Mini Driving Score 检查模型能否短程不出错。</p>
-          <p>结果：autopilot pass，tiny off-road，small blocked。下一步需要修 action/planner/objective。</p>
+          <p>结果：隔离 CARLA + throttle-only 下 tiny/small 均 150m pass；200m 在约 191m off-road。下一步需要恢复安全 steering。</p>
         </details>
         <details data-kind="risk"><summary>Phase 5：长程 500m / D1 低密交通 <span class="tag">not ready</span></summary>
-          <p>进入条件：同一短程 sanity eval 上模型达到至少 50m IFD 且无 hard infraction。</p>
+          <p>进入条件：200m throttle-only pass，并且 steering-enabled 目标至少 150m IFD 且无 hard infraction。</p>
         </details>
       </section>
 
@@ -215,19 +219,18 @@ python -m carla_lewm_drive.driving_lewm.train \
   --run-name d0_tiny_h3_fs5_fast_e5
 
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d0.yaml \
+  --config configs/eval_d0_throttle_only.yaml \
   --checkpoint outputs/d0_tiny_h3_fs5_fast_e5/best.pt \
-  --episodes 1 --route-cap-m 50 --max-episode-seconds 8 \
-  --planner-samples 64 --planner-iterations 2 --planner-horizon 4</code></pre>
+  --output-dir outputs/d0_eval_tiny_throttle_only_150m</code></pre>
       </section>
 
       <section id="gates" data-kind="risk">
         <h2>Go / No-Go</h2>
         <div class="grid">
-          <div class="callout ok"><strong>Continue</strong><br>修 action loss / planner cost / action distribution logging，然后复跑同一短程 sanity。</div>
+          <div class="callout ok"><strong>Continue</strong><br>修 delta-progress objective、pred-aux head、steering-safe prior，然后复跑 150m/200m。</div>
           <div class="callout"><strong>Pause</strong><br>离线 loss 继续下降但 IFD 不提升时，优先诊断控制闭环，不扩大模型。</div>
-          <div class="callout bad"><strong>Stop</strong><br>W&B 未启动、QC 非严格通过、autopilot baseline 失败、或短程 IFD 低于 50m。</div>
-          <div class="callout"><strong>Scale</strong><br>只有 tiny 在短程闭环已接近通过且呈 capacity-limited 时，才继续跑更大 ViT。</div>
+          <div class="callout bad"><strong>Stop</strong><br>W&B 未启动、QC 非严格通过、autopilot baseline 失败、或 `sim_delta_s` 出现外部 tick 跳变。</div>
+          <div class="callout"><strong>Scale</strong><br>只有 steering-enabled 目标呈 capacity-limited 时，才继续跑更大 ViT。</div>
         </div>
       </section>
     </main>

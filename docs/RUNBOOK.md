@@ -122,7 +122,13 @@ Gate:
 
 ## Phase 5: Closed-Loop Evaluation
 
-First validate the environment with autopilot:
+First validate the environment with autopilot. Use an isolated CARLA server for model-policy evaluation. If another client is ticking the same CARLA world, the evaluator raises on large `sim_delta_s` jumps.
+
+Example isolated server launch:
+
+```bash
+./CarlaUE4.sh -RenderOffScreen -nosound -world-port=2100
+```
 
 ```bash
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
@@ -134,32 +140,29 @@ python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --output-dir outputs/d0_eval_autopilot_e2_short
 ```
 
-Then run a cheap model-policy sanity test:
+Then run the validated simplified model-policy target:
 
 ```bash
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d0.yaml \
+  --config configs/eval_d0_throttle_only.yaml \
   --checkpoint outputs/d0_tiny_h3_fs5_fast_e5/best.pt \
-  --episodes 1 \
-  --route-cap-m 50 \
-  --max-episode-seconds 8 \
-  --planner-samples 64 \
-  --planner-iterations 2 \
-  --planner-horizon 4 \
-  --output-dir outputs/d0_eval_tiny_fast_e5_sanity_cem64
+  --output-dir outputs/d0_eval_tiny_throttle_only_150m
 ```
 
 Gate:
 
 - Autopilot must score 100m IFD on the short route.
-- A model checkpoint must reach at least 50m IFD with no hard infraction before running longer 500m evaluation.
+- A model checkpoint must reach at least 150m IFD with no hard infraction on the throttle-only D0 target before steering is re-enabled.
+- A 200m throttle-only run must pass before longer 500m evaluation.
 
-Observed first-pass result:
+Observed valid result:
 
 - Autopilot passed.
-- Tiny failed by off-road at about 14.10m.
-- Small failed by blocked/stuck immediately despite better offline loss.
+- Tiny and small both passed 150m throttle-only on isolated CARLA port 2100.
+- Tiny failed the 200m throttle-only run at 191.11m IFD by off-road.
+- Small failed the 200m throttle-only run at 191.87m IFD by off-road.
+- Earlier port-2000 model-policy outputs were invalidated because an external HIL client was ticking CARLA during model inference.
 
 ## Stop Rule
 
-Do not spend more time on larger ViTs until the action/planner loop is fixed. The next useful experiment is an action-calibrated policy sanity gate, not `base` model training.
+Do not spend more time on larger ViTs until steering/action-objective calibration is fixed. The next useful experiment is a steering-safe policy or delta-progress planner objective, not `base` model training.

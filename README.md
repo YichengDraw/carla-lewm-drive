@@ -26,10 +26,11 @@ Status after the first D0 execution pass:
 - Tiny 5-epoch W&B run: [`d0_tiny_h3_fs5_fast_e5`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_fast_e5-20260522-014214-db1cb3e1), test loss `2.9620`, test pred loss `0.7015`.
 - Small 5-epoch W&B run: [`d0_small_h3_fs5_fast_e5`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e), test loss `1.1324`, test pred loss `0.5269`.
 - Autopilot short baseline: 2/2 episodes, 100m mean infraction-free distance, 100.0 mean mini driving score.
-- Tiny short model sanity, CEM64: 14.10m mean infraction-free distance, 49.0 mini driving score, failed by off-road.
-- Small short model sanity, CEM64: 0.007m mean infraction-free distance, failed by blocked/stuck.
+- The first model sanity runs on port 2000 were invalid for model-policy conclusions because an external HIL client was also ticking CARLA. The evaluator now writes action/timing traces and fails on external tick jumps.
+- Isolated CARLA port 2100, throttle-only D0 target: tiny and small checkpoints both reached 150m IFD with 100.0 mini driving score. Tiny reached 191.11m IFD on a 200m cap before off-road; small reached 191.87m in the same 200m setting.
+- Wider steering CEM remains unreliable: tiny/small select negative steering at the planner boundary and leave the lane. The simplified throttle-only target is the current fair success claim.
 
-Interpretation: the data and training pipeline are now usable, but closed-loop model driving is not mature. Increasing ViT size improved offline losses but did not improve the short closed-loop sanity test, so the next bottleneck is planner/objective/action calibration rather than raw encoder capacity.
+Interpretation: the data and training pipeline are usable, and the tiny LeWM can satisfy a very simplified long-ish closed-loop D0 target. Increasing ViT size improved offline losses but did not extend the throttle-only 200m boundary, so the next bottleneck is still planner/objective/action calibration rather than raw encoder capacity.
 
 ## Installation
 
@@ -98,7 +99,7 @@ carla-lewm-train --config configs/train_tiny.yaml \
   --run-name d0_tiny_h3_fs5_fast_e5
 ```
 
-Use `configs/train_small.yaml` only after tiny has failed a controlled gate. In the first run, `small` improved offline loss but failed closed-loop sanity by getting blocked, so further model scaling is not the next step.
+Use `configs/train_small.yaml` only after tiny has failed a controlled gate. In the first valid isolated evaluation, `small` improved offline loss but did not extend the throttle-only 200m boundary, so further model scaling is not the next step.
 
 ## Evaluation
 
@@ -109,6 +110,14 @@ carla-lewm-eval --config configs/eval_d0.yaml --baseline autopilot --episodes 2 
 carla-lewm-eval --config configs/eval_d0.yaml --checkpoint outputs/d0_tiny_h3_fs5_fast_e5/best.pt \
   --episodes 1 --route-cap-m 50 --max-episode-seconds 8 \
   --planner-samples 64 --planner-iterations 2 --planner-horizon 4
+```
+
+For the current validated simplified target, use an isolated CARLA server on port 2100 and the throttle-only config:
+
+```bash
+carla-lewm-eval --config configs/eval_d0_throttle_only.yaml \
+  --checkpoint outputs/d0_tiny_h3_fs5_fast_e5/best.pt \
+  --output-dir outputs/d0_eval_tiny_throttle_only_150m
 ```
 
 Primary metrics:

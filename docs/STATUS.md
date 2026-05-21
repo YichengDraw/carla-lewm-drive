@@ -4,17 +4,17 @@ Last checked: 2026-05-22 Asia/Shanghai.
 
 ## Verdict
 
-The first strict D0 pass is complete end to end: clean CARLA data was collected, QC passed, tiny and small LeWM variants were trained with W&B, and short closed-loop sanity evaluation ran in CARLA.
+The first strict D0 pass is complete end to end: clean CARLA data was collected, QC passed, tiny and small LeWM variants were trained with W&B, and closed-loop CARLA evaluation now has timing guards against external simulator ticks.
 
-The current result is not yet a successful driving model. The strongest evidence is that `small` improved offline loss substantially but failed the closed-loop sanity test by getting blocked. The next gate is planner/objective/action calibration, not another blind ViT size increase.
+The current valid success claim is intentionally narrow: on an isolated CARLA server and a throttle-only D0 target, both tiny and small checkpoints reach 150m with no hard infractions. At 200m, both fail near 191m by off-road. The next gate is steering/action-objective calibration, not another blind ViT size increase.
 
 ## Repository And Environment
 
 - GitHub repository: `https://github.com/YichengDraw/carla-lewm-drive`
 - Local repo: this repository checkout.
-- Remote run root: `/home/ubuntu/carla_lewm_drive`
+- Remote run root: remote Linux GPU checkout
 - Remote GPU: NVIDIA GeForce RTX 5090, 32GB class VRAM
-- CARLA server: 0.9.16, `127.0.0.1:2000`
+- CARLA server: 0.9.16. Valid model eval used isolated `127.0.0.1:2100`; port 2000 had an external HIL client ticking the world.
 - Serious training used W&B from process start and preserved local CSV/JSON/checkpoints.
 
 ## Data Evidence
@@ -48,14 +48,18 @@ Batch/resource notes:
 | Policy | Episodes | Route Cap | Planner | Mean IFD | Mini Score | Result |
 |---|---:|---:|---|---:|---:|---|
 | Autopilot baseline | 2 | 100m | CARLA autopilot | 100.00m | 100.0 | pass |
-| Tiny checkpoint | 1 | 50m | CEM64, 2 iter, horizon 4 | 14.10m | 49.0 | failed off-road |
-| Small checkpoint | 1 | 50m | CEM64, 2 iter, horizon 4 | 0.007m | 0.011 | failed blocked |
+| Tiny checkpoint | 1 | 150m | isolated port 2100, throttle-only CEM | 150.00m | 100.0 | pass |
+| Small checkpoint | 1 | 150m | isolated port 2100, throttle-only CEM | 150.00m | 100.0 | pass |
+| Tiny checkpoint | 1 | 200m | isolated port 2100, throttle-only CEM | 191.11m | 70.0 | failed off-road |
+| Small checkpoint | 1 | 200m | isolated port 2100, throttle-only CEM | 191.87m | 70.0 | failed off-road |
+| Tiny checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
+| Small checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 
 Interpretation:
 
 - The autopilot baseline verifies that the route, CARLA world, and metric implementation are usable.
-- The tiny checkpoint can move but leaves the lane in the short sanity test.
-- The small checkpoint learns lower offline loss but selects near-stationary actions under the current planner and fails by blocked/stuck.
+- The valid model-policy results require an isolated CARLA server. The evaluator now records `sim_delta_s` and raises on external tick jumps.
+- The throttle-only target shows the model can sustain a simplified long-ish control loop. The 200m failures show that route-following still needs steering calibration.
 
 ## Completed Code Work
 
@@ -63,14 +67,14 @@ Interpretation:
 - Added strict HDF5 QC thresholds and `--allow-infractions` escape hatch.
 - Added fast HDF5 export for random-access training.
 - Hardened training around batch probing, W&B run IDs/resume policy, local CSV fields, checkpoint selection, and CLI overrides.
-- Added CARLA closed-loop evaluator for autopilot and checkpoint policies, including short-eval CLI overrides.
+- Added CARLA closed-loop evaluator for autopilot, constant-action, and checkpoint policies, including short-eval CLI overrides, action traces, and CARLA timing guards.
 - Added tests for QC, training reliability, fast export, metrics, and closed-loop evaluator.
 
 ## Current Next Gate
 
-Before spending more GPU time on larger ViTs, fix the closed-loop action pathway:
+Before spending more GPU time on larger ViTs, fix the closed-loop steering/action pathway:
 
-1. Add direct behavior-cloning action loss or a small action head sanity policy.
-2. Calibrate CEM cost terms against expert trajectory rollouts.
-3. Log chosen throttle/steer/brake distributions during closed-loop eval.
-4. Re-run the same short sanity test and require at least `50m` infraction-free distance before longer 500m evaluation.
+1. Replace absolute progress reward with a delta-progress or speed-tracking objective.
+2. Train or calibrate a predicted-aux head directly on predicted latents.
+3. Add a steering-safe action prior or behavior-cloning action head before re-enabling steering.
+4. Re-run 150m and 200m on isolated CARLA, then only attempt 500m after 200m passes without off-road.
