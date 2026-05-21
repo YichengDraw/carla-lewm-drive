@@ -26,6 +26,7 @@ eval:
   stop_on_collision: true
   stop_on_blocked: true
   model_warmup_action: [0.0, 0.0, 1.0]
+  constant_action: [0.45, 0.0, 0.0]
   save_contact_sheet: true
   contact_sheet_every: 25
   max_contact_sheet_frames: 48

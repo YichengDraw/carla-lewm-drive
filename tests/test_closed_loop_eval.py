@@ -9,6 +9,7 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     CEMPlanner,
     apply_cli_overrides,
     expand_action_to_model_dim,
+    normalize_policy,
     run_dry_eval,
     write_action_trace,
     write_metrics,
@@ -158,6 +159,22 @@ def test_autopilot_dry_run_does_not_require_checkpoint(tmp_path):
     assert out["status"] == "config_loaded"
     assert out["policy"] == "autopilot"
     assert out["episodes"] == 2
+
+
+def test_constant_policy_dry_run_does_not_require_checkpoint(tmp_path):
+    cfg = {
+        "eval": {
+            "eval_episodes": 1,
+            "route_cap_m": 50.0,
+            "output_dir": str(tmp_path),
+        }
+    }
+
+    out = run_dry_eval(cfg, checkpoint_path=None, policy=normalize_policy("constant"))
+
+    assert out["status"] == "config_loaded"
+    assert out["policy"] == "constant"
+    assert out["route_cap_m"] == 50.0
 
 
 def test_apply_cli_overrides_supports_short_eval_knobs(tmp_path):

@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run closed-loop CARLA evaluation for Driving-LeWM or autopilot.")
     parser.add_argument("--config", type=Path, default=Path("configs/eval_d0.yaml"))
     parser.add_argument("--checkpoint", type=Path, default=None)
-    parser.add_argument("--policy", choices=["checkpoint", "model", "expert", "autopilot"], default=None)
+    parser.add_argument("--policy", choices=["checkpoint", "model", "expert", "autopilot", "constant"], default=None)
     parser.add_argument("--baseline", choices=["expert", "autopilot"], default=None)
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -53,6 +53,8 @@ def normalize_policy(policy: str | None) -> str:
         return "model"
     if value in {"expert", "autopilot"}:
         return "autopilot"
+    if value == "constant":
+        return "constant"
     raise ValueError(f"Unknown eval policy {policy!r}")
 
 
@@ -486,7 +488,7 @@ def maybe_store_frame(
 ) -> None:
     every = max(1, int(eval_cfg.get("contact_sheet_every", 25)))
     max_frames = int(eval_cfg.get("max_contact_sheet_frames", 48))
-    if step % every == 0 and len(frames) < max_frames:
+    if (step == 1 or step % every == 0) and len(frames) < max_frames:
         frames.append((rgb.copy(), f"ep{episode} step{step}"))
     if bool(eval_cfg.get("save_frames", False)):
         frame_dir = output_dir / "frames" / f"episode_{episode:03d}"
@@ -591,6 +593,9 @@ def run_episode(
                 history_actions = torch.from_numpy(hist).unsqueeze(0).float()
                 action = planner.propose(model, pixels, history_actions, device)
                 block_actions = [action for _ in range(frameskip)]
+            elif policy == "constant":
+                action = np.asarray(eval_cfg.get("constant_action", [0.45, 0.0, 0.0]), dtype=np.float32)
+                block_actions = [action]
             else:
                 block_actions = [None]
 
