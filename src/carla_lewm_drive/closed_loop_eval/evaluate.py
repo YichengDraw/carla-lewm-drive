@@ -24,8 +24,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run closed-loop CARLA evaluation for Driving-LeWM or autopilot.")
     parser.add_argument("--config", type=Path, default=Path("configs/eval_d0.yaml"))
     parser.add_argument("--checkpoint", type=Path, default=None)
-    parser.add_argument("--policy", choices=["checkpoint", "model", "expert", "autopilot", "constant"], default=None)
-    parser.add_argument("--baseline", choices=["expert", "autopilot"], default=None)
+    parser.add_argument(
+        "--policy",
+        choices=["checkpoint", "model", "model_lane_keep", "expert", "autopilot", "constant", "lane_keep"],
+        default=None,
+    )
+    parser.add_argument("--baseline", choices=["expert", "autopilot", "lane_keep"], default=None)
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--max-episode-seconds", type=float, default=None)
@@ -52,11 +56,19 @@ def normalize_policy(policy: str | None) -> str:
     value = (policy or "checkpoint").lower()
     if value in {"checkpoint", "model"}:
         return "model"
+    if value == "model_lane_keep":
+        return "model_lane_keep"
     if value in {"expert", "autopilot"}:
         return "autopilot"
     if value == "constant":
         return "constant"
+    if value == "lane_keep":
+        return "lane_keep"
     raise ValueError(f"Unknown eval policy {policy!r}")
+
+
+def is_model_policy(policy: str) -> bool:
+    return policy in {"model", "model_lane_keep"}
 
 
 def resolve_policy(cfg: dict[str, Any], args: argparse.Namespace | None = None) -> str:
@@ -280,7 +292,7 @@ def run_dry_eval(cfg: dict[str, Any], checkpoint_path: Path | None, policy: str)
         "route_cap_m": float(eval_cfg["route_cap_m"]),
         "output_dir": str(eval_cfg["output_dir"]),
     }
-    if policy == "model":
+    if is_model_policy(policy):
         if checkpoint_path is None:
             raise ValueError("A checkpoint is required for checkpoint/model dry-run validation")
         model = load_model(checkpoint_path)
@@ -353,6 +365,8 @@ def write_action_trace(output_dir: Path, episode_idx: int, rows: list[dict[str, 
         "throttle",
         "steer",
         "brake",
+        "lane_offset_m",
+        "heading_error_rad",
         "offroad",
         "blocked",
         "collision_count",
@@ -483,6 +497,33 @@ def to_vehicle_control(carla, action: np.ndarray):
     return carla.VehicleControl(throttle=float(clipped[0]), steer=float(clipped[1]), brake=float(clipped[2]))
 
 
+def lane_keep_steer(lane_offset_m: float, heading_error_rad: float, eval_cfg: dict[str, Any]) -> float:
+    lane_cfg = eval_cfg.get("lane_keep", {})
+    steer_limit = abs(float(lane_cfg.get("steer_limit", 0.25)))
+    steer_bias = float(lane_cfg.get("steer_bias", 0.0))
+    lane_gain = float(lane_cfg.get("lane_offset_gain", 0.18))
+    heading_gain = float(lane_cfg.get("heading_error_gain", 1.0))
+    steer = steer_bias - lane_gain * float(lane_offset_m) - heading_gain * float(heading_error_rad)
+    return float(np.clip(steer, -steer_limit, steer_limit))
+
+
+def lane_keep_action(lane_offset_m: float, heading_error_rad: float, speed_mps: float, eval_cfg: dict[str, Any]) -> np.ndarray:
+    lane_cfg = eval_cfg.get("lane_keep", {})
+    target_speed_mps = float(lane_cfg.get("target_speed_mps", float(eval_cfg["target_speed_kmh"]) / 3.6))
+    throttle_base = float(lane_cfg.get("throttle", 0.42))
+    throttle_kp = float(lane_cfg.get("speed_kp", 0.04))
+    throttle_min = float(lane_cfg.get("throttle_min", 0.20))
+    throttle_max = float(lane_cfg.get("throttle_max", 0.60))
+    brake = 0.0
+    speed_error = target_speed_mps - float(speed_mps)
+    throttle = float(np.clip(throttle_base + throttle_kp * speed_error, throttle_min, throttle_max))
+    overspeed_margin = float(lane_cfg.get("overspeed_margin_mps", 2.0))
+    if speed_error < -overspeed_margin:
+        throttle = 0.0
+        brake = float(np.clip(float(lane_cfg.get("brake_kp", 0.08)) * (-speed_error - overspeed_margin), 0.0, 0.35))
+    return np.asarray([throttle, lane_keep_steer(lane_offset_m, heading_error_rad, eval_cfg), brake], dtype=np.float32)
+
+
 def preprocess_pixels(frames: list[np.ndarray], image_size: int, device: torch.device) -> torch.Tensor:
     if not frames:
         raise ValueError("Need at least one RGB frame for model policy")
@@ -585,7 +626,7 @@ def run_episode(
 
         image_history: list[np.ndarray] = []
         action_history: list[np.ndarray] = []
-        if policy == "model":
+        if is_model_policy(policy):
             if model is None or planner is None:
                 raise ValueError("Model policy requires both model and planner")
             idle_action = np.asarray(eval_cfg.get("model_warmup_action", [0.0, 0.0, 1.0]), dtype=np.float32)
@@ -603,13 +644,22 @@ def run_episode(
         previous_loc = ego.get_location()
         world_map = world.get_map()
         while step < max_steps and acc.route_progress_m < route_length_m:
-            if policy == "model":
+            current_transform = ego.get_transform()
+            pre_lane_offset, pre_heading_error, _ = lane_metrics(carla, world_map, current_transform)
+            current_speed = vehicle_speed(ego)
+            if is_model_policy(policy):
                 assert model is not None and planner is not None
                 pixels = preprocess_pixels(image_history[-int(model.cfg.history_size) :], int(model.cfg.image_size), device)
                 hist = np.stack(action_history[-int(model.cfg.history_size) :], axis=0)
                 history_actions = torch.from_numpy(hist).unsqueeze(0).float()
                 action = planner.propose(model, pixels, history_actions, device)
+                if policy == "model_lane_keep":
+                    action = np.asarray(action, dtype=np.float32).copy()
+                    action[1] = lane_keep_steer(pre_lane_offset, pre_heading_error, eval_cfg)
                 block_actions = [action for _ in range(frameskip)]
+            elif policy == "lane_keep":
+                action = lane_keep_action(pre_lane_offset, pre_heading_error, current_speed, eval_cfg)
+                block_actions = [action]
             elif policy == "constant":
                 action = np.asarray(eval_cfg.get("constant_action", [0.45, 0.0, 0.0]), dtype=np.float32)
                 block_actions = [action]
@@ -640,7 +690,7 @@ def run_episode(
                 acc.route_progress_m += location_distance(previous_loc, loc)
                 previous_loc = loc
                 speed = vehicle_speed(ego)
-                _, _, offroad = lane_metrics(carla, world_map, transform)
+                lane_offset, heading_error, offroad = lane_metrics(carla, world_map, transform)
                 control = ego.get_control()
 
                 current_collision_count = int(collision_events["count"])
@@ -676,6 +726,8 @@ def run_episode(
                             "throttle": float(control.throttle),
                             "steer": float(control.steer),
                             "brake": float(control.brake),
+                            "lane_offset_m": float(lane_offset),
+                            "heading_error_rad": float(heading_error),
                             "offroad": int(bool(offroad)),
                             "blocked": int(bool(blocked)),
                             "collision_count": int(acc.collision_count),
@@ -692,7 +744,7 @@ def run_episode(
                 if step >= max_steps or acc.route_progress_m >= route_length_m:
                     break
 
-            if policy == "model" and latest_rgb is not None and block_raw_actions:
+            if is_model_policy(policy) and latest_rgb is not None and block_raw_actions:
                 image_history.append(latest_rgb)
                 block = np.asarray(block_raw_actions, dtype=np.float32)
                 if block.shape[0] < frameskip:
@@ -727,7 +779,7 @@ def run_closed_loop_eval(cfg: dict[str, Any], checkpoint_path: Path | None, poli
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model: DrivingLeWM | None = None
     planner: CEMPlanner | None = None
-    if policy == "model":
+    if is_model_policy(policy):
         if checkpoint_path is None:
             raise ValueError("A checkpoint is required for checkpoint/model evaluation")
         model = load_model(checkpoint_path).to(device)

@@ -9,6 +9,8 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     CEMPlanner,
     apply_cli_overrides,
     expand_action_to_model_dim,
+    lane_keep_action,
+    lane_keep_steer,
     normalize_policy,
     run_dry_eval,
     write_action_trace,
@@ -101,6 +103,42 @@ def test_cem_planner_applies_configured_bounds_and_exclusive_throttle_brake():
     assert sanitized[0, 1].tolist() == pytest.approx([0.0, -0.1, 0.6])
 
 
+def test_lane_keep_steer_corrects_positive_lane_offset_left():
+    eval_cfg = {
+        "target_speed_kmh": 20.0,
+        "lane_keep": {
+            "lane_offset_gain": 0.2,
+            "heading_error_gain": 1.0,
+            "steer_limit": 0.1,
+        },
+    }
+
+    assert lane_keep_steer(1.0, 0.0, eval_cfg) == pytest.approx(-0.1)
+    assert lane_keep_steer(-1.0, 0.0, eval_cfg) == pytest.approx(0.1)
+
+
+def test_lane_keep_action_uses_speed_control_and_brake_when_overspeeding():
+    eval_cfg = {
+        "target_speed_kmh": 18.0,
+        "lane_keep": {
+            "throttle": 0.4,
+            "speed_kp": 0.05,
+            "throttle_min": 0.1,
+            "throttle_max": 0.7,
+            "overspeed_margin_mps": 1.0,
+            "brake_kp": 0.1,
+            "steer_limit": 0.2,
+        },
+    }
+
+    slow = lane_keep_action(0.0, 0.0, speed_mps=2.0, eval_cfg=eval_cfg)
+    fast = lane_keep_action(0.0, 0.0, speed_mps=8.0, eval_cfg=eval_cfg)
+
+    assert slow.tolist() == pytest.approx([0.55, 0.0, 0.0])
+    assert fast[0] == pytest.approx(0.0)
+    assert fast[2] > 0.0
+
+
 def test_write_metrics_outputs_episode_csv_and_summary(tmp_path):
     row = DrivingEpisodeMetrics(
         route_length_m=100.0,
@@ -131,6 +169,8 @@ def test_write_action_trace_outputs_stepwise_control_csv(tmp_path):
                 "throttle": 0.4,
                 "steer": -0.01,
                 "brake": 0.0,
+                "lane_offset_m": 0.12,
+                "heading_error_rad": -0.03,
                 "offroad": 0,
                 "blocked": 0,
                 "collision_count": 0,
@@ -143,6 +183,8 @@ def test_write_action_trace_outputs_stepwise_control_csv(tmp_path):
         rows = list(csv.DictReader(f))
     assert rows[0]["throttle"] == "0.4"
     assert rows[0]["steer"] == "-0.01"
+    assert rows[0]["lane_offset_m"] == "0.12"
+    assert rows[0]["heading_error_rad"] == "-0.03"
 
 
 def test_autopilot_dry_run_does_not_require_checkpoint(tmp_path):
@@ -175,6 +217,22 @@ def test_constant_policy_dry_run_does_not_require_checkpoint(tmp_path):
     assert out["status"] == "config_loaded"
     assert out["policy"] == "constant"
     assert out["route_cap_m"] == 50.0
+
+
+def test_lane_keep_policy_dry_run_does_not_require_checkpoint(tmp_path):
+    cfg = {
+        "eval": {
+            "eval_episodes": 1,
+            "route_cap_m": 80.0,
+            "output_dir": str(tmp_path),
+        }
+    }
+
+    out = run_dry_eval(cfg, checkpoint_path=None, policy=normalize_policy("lane_keep"))
+
+    assert out["status"] == "config_loaded"
+    assert out["policy"] == "lane_keep"
+    assert out["route_cap_m"] == 80.0
 
 
 def test_apply_cli_overrides_supports_short_eval_knobs(tmp_path):
