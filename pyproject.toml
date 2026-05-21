@@ -29,6 +29,7 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 carla-lewm-collect = "carla_lewm_drive.carla_collect.collect_dataset:main"
 carla-lewm-qc = "carla_lewm_drive.dataset_qc.validate_hdf5:main"
+carla-lewm-export-fast-hdf5 = "carla_lewm_drive.dataset_qc.export_fast_hdf5:main"
 carla-lewm-train = "carla_lewm_drive.driving_lewm.train:main"
 carla-lewm-eval = "carla_lewm_drive.closed_loop_eval.evaluate:main"
 carla-lewm-build-html = "carla_lewm_drive.html_report.build_interactive_plan:main"

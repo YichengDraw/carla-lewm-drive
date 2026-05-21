@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build the CARLA-LeWM interactive project plan HTML.")
+    parser = argparse.ArgumentParser(description="Build the CARLA-LeWM interactive project dashboard HTML.")
     parser.add_argument("--output", type=Path, default=Path("interactive_plan.html"))
     return parser.parse_args()
 
@@ -15,7 +15,7 @@ HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CARLA-LeWM 小规模长程驾驶项目规划</title>
+  <title>CARLA-LeWM 小规模长程驾驶执行看板</title>
   <style>
     :root {
       color-scheme: light;
@@ -50,6 +50,7 @@ HTML = r"""<!doctype html>
     section, details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 16px; }
     section h2, details h2 { margin: 0 0 10px; font-size: 18px; }
     details summary { cursor: pointer; font-weight: 720; font-size: 17px; }
+    a { color: var(--accent); }
     .metrics { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 10px; }
     .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; }
     .metric strong { display: block; font-size: 18px; }
@@ -67,6 +68,9 @@ HTML = r"""<!doctype html>
     .tag.good { color: #0f6b50; border-color: #b7e4d4; background: #e9f7f2; }
     .tag.warn { color: #8a4d00; border-color: #f1cf8a; background: #fff4df; }
     .tag.bad { color: #9f241a; border-color: #f2b8b5; background: #fdeceb; }
+    .bar { height: 10px; background: #e7edf5; border-radius: 999px; overflow: hidden; min-width: 130px; }
+    .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+    .bar.bad > span { background: var(--bad); }
     mark.search-hit { background: #fff08a; padding: 0 2px; }
     mark.current-hit { outline: 2px solid #f59e0b; }
     .hidden-kind { display: none; }
@@ -81,11 +85,11 @@ HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>CARLA-LeWM 小规模长程驾驶项目规划</h1>
-    <p>先把驾驶任务压到模型可学、可验证的范围，再用逐帧数据质量、W&B 曲线和闭环驾驶距离决定是否扩大模型或场景。</p>
+    <h1>CARLA-LeWM 小规模长程驾驶执行看板</h1>
+    <p>先看当前结论，再看数据、W&B、闭环评估证据；所有 run name 旁边都解释了配置含义。</p>
   </header>
   <div class="toolbar">
-    <input id="search" placeholder="搜索 phase / LeWM / W&B / QC / tiny">
+    <input id="search" placeholder="搜索 phase / W&B / tiny / small / IFD / QC">
     <button id="prev" type="button">&lt;</button>
     <button id="next" type="button">&gt;</button>
     <span id="count" class="tag">0</span>
@@ -100,8 +104,10 @@ HTML = r"""<!doctype html>
       <a href="#verdict">当前结论</a>
       <a href="#terms">名词速查</a>
       <a href="#decoder">实验名解码</a>
+      <a href="#data">数据证据</a>
+      <a href="#wandb">W&B 证据</a>
+      <a href="#eval">闭环评估</a>
       <a href="#phases">阶段计划</a>
-      <a href="#metrics">指标</a>
       <a href="#commands">命令</a>
       <a href="#gates">Go / No-Go</a>
     </nav>
@@ -109,14 +115,14 @@ HTML = r"""<!doctype html>
       <section id="verdict" data-kind="all">
         <h2>当前结论</h2>
         <div class="metrics">
-          <div class="metric"><span>Phase</span><strong>0-1</strong><span>代码和 D0-smoke 门控</span></div>
-          <div class="metric"><span>Model</span><strong>ViT tiny</strong><span>失败后才升 small</span></div>
-          <div class="metric"><span>Data QC</span><strong>逐帧</strong><span>HDF5 + contact sheet</span></div>
-          <div class="metric"><span>W&B</span><strong>必开</strong><span>serious run 启动即记录</span></div>
-          <div class="metric"><span>GPU</span><strong>5090</strong><span>训练默认远端</span></div>
+          <div class="metric"><span>Phase</span><strong>D0 pass</strong><span>采集、QC、训练、短评估完成</span></div>
+          <div class="metric"><span>Dataset</span><strong>48k</strong><span>D0-train 严格 QC 通过</span></div>
+          <div class="metric"><span>Best offline</span><strong>small</strong><span>test/loss 1.1324</span></div>
+          <div class="metric"><span>Best closed-loop</span><strong>tiny</strong><span>IFD 14.10m，但失败</span></div>
+          <div class="metric"><span>Next</span><strong>planner</strong><span>先修动作/目标/规划</span></div>
         </div>
-        <div class="callout">
-          当前状态：项目骨架已定义；真实采集需要 CARLA 0.9.16 server 和匹配 Python API；训练需要生成并通过 QC 的 D0 数据集。
+        <div class="callout bad">
+          当前状态：数据和训练流水线可信，但模型闭环驾驶还没有成功。small 离线 loss 更低，却在短程 CARLA sanity eval 里 blocked，所以继续放大 ViT 不是下一步。
         </div>
       </section>
 
@@ -124,90 +130,116 @@ HTML = r"""<!doctype html>
         <h2>名词速查</h2>
         <table>
           <tr><th>Term</th><th>解释</th></tr>
-          <tr><td><code>CARLA</code></td><td>自动驾驶仿真器，用来生成相机、车辆控制、车道、碰撞和红灯事件数据。</td></tr>
-          <tr><td><code>LeWM</code></td><td>LeWorldModel，端到端从图像学习 latent dynamics 的世界模型。</td></tr>
-          <tr><td><code>ViT tiny / small / base</code></td><td>视觉 Transformer 编码器大小；tiny 是主线，small 是 capacity 失败后的升级。</td></tr>
-          <tr><td><code>W&B</code></td><td>Weights & Biases，用于训练曲线、验证指标、视频和配置记录。</td></tr>
-          <tr><td><code>QC</code></td><td>Quality Control，逐帧检查数据是否缺帧、空白、动作异常或事件标签不可信。</td></tr>
-          <tr><td><code>closed-loop eval</code></td><td>模型真实控制 CARLA 车辆，不只是离线 loss。</td></tr>
-          <tr><td><code>Infraction-Free Distance</code></td><td>首次碰撞、离路、闯红灯、停死前的行驶距离，单位米。</td></tr>
-          <tr><td><code>Mini Driving Score</code></td><td>路线完成度乘以违规惩罚，借鉴 CARLA Leaderboard 的评估思路。</td></tr>
-          <tr><td><code>D0 / D1 / D2</code></td><td>D0 单车低速白天；D1 低密交通；D2 held-out 路线/随机种子。</td></tr>
-          <tr><td><code>CEM</code></td><td>Cross-Entropy Method，采样多条动作序列并选择低 cost 的规划器。</td></tr>
+          <tr><td><code>CARLA</code></td><td>自动驾驶仿真器，本项目使用它生成相机、车辆控制、车道、碰撞和红灯事件。</td></tr>
+          <tr><td><code>LeWM</code></td><td>LeWorldModel，使用视觉输入学习 latent dynamics 的小世界模型。</td></tr>
+          <tr><td><code>ViT tiny / small</code></td><td>视觉 Transformer 编码器大小；本轮 tiny 和 small 都训练并做了短程闭环评估。</td></tr>
+          <tr><td><code>W&B</code></td><td>Weights & Biases，用于记录训练曲线、配置、summary 和 run 链接。</td></tr>
+          <tr><td><code>QC</code></td><td>Quality Control，逐帧检查缺帧、空白、动作异常、碰撞、离路、红灯和 blocked。</td></tr>
+          <tr><td><code>IFD</code></td><td>Infraction-Free Distance，首次 hard infraction 前的行驶距离，越高越好。</td></tr>
+          <tr><td><code>Mini Driving Score</code></td><td>路线完成度乘违规惩罚，用来防止只看是否开到终点。</td></tr>
+          <tr><td><code>CEM64</code></td><td>Cross-Entropy Method 规划器，64 个动作样本、2 次迭代、horizon 4，用于短程 sanity eval。</td></tr>
+          <tr><td><code>D0</code></td><td>单车、白天、固定简化路线、强约束质量门控，是第一阶段最简单数据分布。</td></tr>
         </table>
       </section>
 
       <section id="decoder" data-kind="train">
         <h2>实验名解码</h2>
-        <p><code>d0_tiny_h3_fs5</code>：D0 简化场景、ViT tiny、3 帧历史、每 5 个 CARLA 原始帧合成一个模型动作步。</p>
+        <p><code>d0_tiny_h3_fs5_fast_e5</code>：D0 简化路线、ViT tiny、3 帧历史、5 帧合并一个动作步、fast HDF5、训练 5 epoch。</p>
         <table>
           <tr><th>片段</th><th>含义</th></tr>
-          <tr><td><code>d0</code></td><td>单车、白天、干燥、低速路线。</td></tr>
-          <tr><td><code>tiny</code></td><td>最小 ViT 主线，优先证明小模型是否能学。</td></tr>
+          <tr><td><code>d0</code></td><td>单车低速白天简化场景。</td></tr>
+          <tr><td><code>tiny / small</code></td><td>ViT encoder 大小。</td></tr>
           <tr><td><code>h3</code></td><td>模型输入 3 个历史视觉状态。</td></tr>
-          <tr><td><code>fs5</code></td><td>CARLA 20Hz 原始控制每 5 帧合并，模型步长约 0.25s。</td></tr>
+          <tr><td><code>fs5</code></td><td>CARLA 20Hz 控制每 5 帧合并，模型步长约 0.25s。</td></tr>
+          <tr><td><code>fast</code></td><td>使用未压缩/chunked HDF5，避免训练随机读取卡住。</td></tr>
+          <tr><td><code>e5</code></td><td>训练 5 epoch，用于第一轮可比实验。</td></tr>
         </table>
+      </section>
+
+      <section id="data" data-kind="data">
+        <h2>数据证据</h2>
+        <table>
+          <tr><th>Dataset</th><th>Episodes</th><th>Frames</th><th>QC</th><th>Hard infractions</th></tr>
+          <tr><td><code>D0-smoke</code></td><td>20</td><td>12,000</td><td><span class="tag good">pass</span></td><td>0 collision / 0 off-road / 0 red / 0 blocked</td></tr>
+          <tr><td><code>D0-train</code></td><td>80</td><td>48,000</td><td><span class="tag good">pass</span></td><td>0 collision / 0 off-road / 0 red / 0 blocked</td></tr>
+        </table>
+        <div class="callout ok">读法：这张表证明 D0 训练数据本身足够干净，可以进入模型训练。它不能证明模型闭环会开车。</div>
+      </section>
+
+      <section id="wandb" data-kind="train">
+        <h2>W&B 证据</h2>
+        <table>
+          <tr><th>Run</th><th>模型</th><th>Batch</th><th>Val/Test</th><th>曲线读法</th></tr>
+          <tr>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_fast_e5-20260522-014214-db1cb3e1"><code>d0_tiny_h3_fs5_fast_e5</code></a><br>tiny、D0、fast HDF5、5 epoch。</td>
+            <td>ViT tiny</td><td>192</td><td>val 2.9568<br>test 2.9620<br>pred 0.7015</td><td><div class="bar"><span style="width: 38%"></span></div>离线 loss 有下降，但闭环仍离路。</td>
+          </tr>
+          <tr>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e"><code>d0_small_h3_fs5_fast_e5</code></a><br>small、D0、fast HDF5、5 epoch。</td>
+            <td>ViT small</td><td>128</td><td>val 1.1281<br>test 1.1324<br>pred 0.5269</td><td><div class="bar"><span style="width: 75%"></span></div>离线 loss 更好，但闭环直接 blocked。</td>
+          </tr>
+        </table>
+        <div class="callout">当前结论：W&B 曲线和 test loss 只能证明离线拟合变好，不能单独证明闭环控制成功。</div>
+      </section>
+
+      <section id="eval" data-kind="eval">
+        <h2>闭环评估</h2>
+        <table>
+          <tr><th>Policy</th><th>配置</th><th>IFD</th><th>Mini Score</th><th>结论</th></tr>
+          <tr><td>Autopilot baseline</td><td>2 episodes, 100m cap</td><td>100.00m</td><td>100.0</td><td><span class="tag good">pass</span> 环境和指标可信。</td></tr>
+          <tr><td>tiny checkpoint</td><td>1 episode, 50m cap, CEM64</td><td>14.10m</td><td>49.0</td><td><span class="tag bad">fail</span> 能移动，但离路。</td></tr>
+          <tr><td>small checkpoint</td><td>1 episode, 50m cap, CEM64</td><td>0.007m</td><td>0.011</td><td><span class="tag bad">fail</span> 基本停住，被 blocked。</td></tr>
+        </table>
+        <div class="callout bad">当前门控：模型必须在同一短程 sanity eval 上达到至少 50m IFD，才值得跑 500m 长程评估。</div>
       </section>
 
       <section id="phases" data-kind="all">
         <h2>阶段计划</h2>
-        <details open data-kind="data"><summary>Phase 0：环境和仓库门控 <span class="tag warn">current</span></summary>
-          <p>目标：确认独立 GitHub repo、CARLA 0.9.16、Python API、W&B、5090、磁盘和配置路径。</p>
-          <p>退出条件：<code>carla-lewm-build-html</code>、<code>carla-lewm-qc --help</code>、<code>carla-lewm-train --help</code> 可运行；远端 5090 和 W&B 状态被记录。</p>
+        <details open data-kind="data"><summary>Phase 0-1：环境、采集、逐帧 QC <span class="tag good">done</span></summary>
+          <p>目标：建立 GitHub repo、CARLA 0.9.16 采集、逐帧 QC 和 contact sheet 人工核查。</p>
+          <p>结果：D0-smoke 和 D0-train 都 strict pass；40s 版本因长尾离路/碰撞被放弃，30s 简化数据进入训练。</p>
         </details>
-        <details open data-kind="data"><summary>Phase 1：D0-smoke 采集和逐帧 QC <span class="tag warn">gate</span></summary>
-          <p>目标：采 20 条 30 秒单车路线，生成 HDF5、recorder log、contact sheet、逐帧 QC JSON。</p>
-          <p>退出条件：0 hard QC issue、expert hard infraction 接近 0、人工逐帧抽查能确认画面/动作/事件标签一致。</p>
+        <details open data-kind="train"><summary>Phase 2-3：tiny / small 训练 <span class="tag good">done</span></summary>
+          <p>目标：先 tiny，再在 tiny 闭环不理想后尝试 small；全程 W&B 记录。</p>
+          <p>结果：small 离线 loss 更低，但闭环更差；模型大小不是当前主瓶颈。</p>
         </details>
-        <details data-kind="train"><summary>Phase 2：batch sweep 和 tiny smoke <span class="tag">planned</span></summary>
-          <p>目标：按 <code>256 -> 192 -> 128 -> 96 -> 64</code> 找到最大稳定 batch，确认 5090 没有明显浪费。</p>
-          <p>退出条件：batch probe 写入 JSON，tiny smoke 有下降的 train/val loss，W&B 曲线和本地 CSV 同步存在。</p>
+        <details open data-kind="eval"><summary>Phase 4：短程闭环 sanity <span class="tag bad">blocked</span></summary>
+          <p>目标：用 IFD 和 Mini Driving Score 检查模型能否短程不出错。</p>
+          <p>结果：autopilot pass，tiny off-road，small blocked。下一步需要修 action/planner/objective。</p>
         </details>
-        <details data-kind="train"><summary>Phase 3：tiny 主训练和闭环选择 <span class="tag">planned</span></summary>
-          <p>目标：每 5 epoch 做验证，按 closed-loop <code>Infraction-Free Distance</code> 选 best checkpoint。</p>
-          <p>退出条件：held-out D0 median 距离达到 300m 或失败原因被归类为数据、cost、planner、capacity。</p>
+        <details data-kind="risk"><summary>Phase 5：长程 500m / D1 低密交通 <span class="tag">not ready</span></summary>
+          <p>进入条件：同一短程 sanity eval 上模型达到至少 50m IFD 且无 hard infraction。</p>
         </details>
-        <details data-kind="train"><summary>Phase 4：small 升级门控 <span class="tag">conditional</span></summary>
-          <p>目标：只有 tiny 显示 capacity-limited 时，使用同协议训练 small。</p>
-          <p>退出条件：small 在相同 D0 manifest 上带来稳定闭环提升，否则停止扩大模型。</p>
-        </details>
-        <details data-kind="eval"><summary>Phase 5：D1 低密交通 <span class="tag">conditional</span></summary>
-          <p>目标：加入少量车辆、无行人、保持低速，检查模型是否维持长程安全。</p>
-          <p>退出条件：报告 per-km infractions、路线完成度和失败视频。</p>
-        </details>
-      </section>
-
-      <section id="metrics" data-kind="eval">
-        <h2>指标</h2>
-        <table>
-          <tr><th>指标</th><th>定义</th><th>读法</th></tr>
-          <tr><td><code>Infraction-Free Distance</code></td><td>首次 hard infraction 前累计米数，cap 为路线长度。</td><td>越高越好，是主指标。</td></tr>
-          <tr><td><code>Mini Driving Score</code></td><td>路线完成百分比乘 collision/offroad/red-light/blocked 惩罚。</td><td>越高越好，防止只停车不撞。</td></tr>
-          <tr><td><code>val/pred_loss</code></td><td>预测下一 latent 的 MSE。</td><td>越低越好，但不能单独证明能开车。</td></tr>
-          <tr><td><code>QC hard issues</code></td><td>缺 key、缺帧、空白帧、非有限 action 等硬错误。</td><td>必须为 0 才进入训练。</td></tr>
-        </table>
       </section>
 
       <section id="commands" data-kind="all">
-        <h2>命令</h2>
-        <pre><code class="language-bash">pip install -r requirements.txt
-pip install -e .
+        <h2>关键命令</h2>
+        <pre><code class="language-bash">python -m carla_lewm_drive.dataset_qc.export_fast_hdf5 \
+  --src data/d0_train/carla_d0_train.h5 \
+  --dst data/d0_train/carla_d0_train_fast.h5 \
+  --chunk-frames 256 --overwrite
 
-carla-lewm-build-html --output interactive_plan.html
-carla-lewm-collect --config configs/d0_smoke.yaml --episodes 2 --seconds 5
-carla-lewm-qc --dataset data/d0_smoke/carla_d0_smoke.h5 --out-dir outputs/qc_d0_smoke --strict
-carla-lewm-train --config configs/train_tiny.yaml --batch-probe
-carla-lewm-train --config configs/train_tiny.yaml
-carla-lewm-eval --config configs/eval_d0.yaml --checkpoint outputs/d0_tiny_h3_fs5/best.pt</code></pre>
+python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_tiny.yaml \
+  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
+  --batch-size 192 --num-workers 2 --max-epochs 5 \
+  --output-dir outputs/d0_tiny_h3_fs5_fast_e5 \
+  --run-name d0_tiny_h3_fs5_fast_e5
+
+python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d0.yaml \
+  --checkpoint outputs/d0_tiny_h3_fs5_fast_e5/best.pt \
+  --episodes 1 --route-cap-m 50 --max-episode-seconds 8 \
+  --planner-samples 64 --planner-iterations 2 --planner-horizon 4</code></pre>
       </section>
 
       <section id="gates" data-kind="risk">
         <h2>Go / No-Go</h2>
         <div class="grid">
-          <div class="callout ok"><strong>Continue</strong><br>QC hard issues 为 0，tiny 离线 loss 下降，expert baseline 正常，held-out D0 闭环距离持续提升。</div>
-          <div class="callout"><strong>Pause</strong><br>训练 loss 下降但 closed-loop 无提升，优先查 cost 和 planner，不直接扩大模型。</div>
-          <div class="callout bad"><strong>Stop</strong><br>数据逐帧异常、W&B 未启动、评估 manifest 不一致、或 CARLA expert baseline 本身失败。</div>
-          <div class="callout"><strong>Scale</strong><br>tiny 通过所有 sanity 但明显 capacity-limited 时，才跑 small；base 不作为主线。</div>
+          <div class="callout ok"><strong>Continue</strong><br>修 action loss / planner cost / action distribution logging，然后复跑同一短程 sanity。</div>
+          <div class="callout"><strong>Pause</strong><br>离线 loss 继续下降但 IFD 不提升时，优先诊断控制闭环，不扩大模型。</div>
+          <div class="callout bad"><strong>Stop</strong><br>W&B 未启动、QC 非严格通过、autopilot baseline 失败、或短程 IFD 低于 50m。</div>
+          <div class="callout"><strong>Scale</strong><br>只有 tiny 在短程闭环已接近通过且呈 capacity-limited 时，才继续跑更大 ViT。</div>
         </div>
       </section>
     </main>

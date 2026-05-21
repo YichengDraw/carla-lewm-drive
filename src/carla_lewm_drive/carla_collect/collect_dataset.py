@@ -66,6 +66,14 @@ def make_collision_sensor(carla, world, ego):
     return world.spawn_actor(bp, carla.Transform(), attach_to=ego)
 
 
+def simplify_traffic_lights(carla, world, scenario: dict[str, Any]) -> None:
+    if not bool(scenario.get("force_green_lights", False)):
+        return
+    for actor in world.get_actors().filter("traffic.traffic_light*"):
+        actor.set_state(carla.TrafficLightState.Green)
+        actor.freeze(True)
+
+
 def spawn_ego(carla, world, spawn_index: int):
     blueprints = world.get_blueprint_library().filter("vehicle.tesla.model3")
     bp = blueprints[0]
@@ -90,26 +98,87 @@ def read_rgb(image) -> np.ndarray:
     return arr[:, :, :3][:, :, ::-1].copy()
 
 
-def lane_metrics(world_map, transform) -> tuple[float, float, float]:
-    waypoint = world_map.get_waypoint(transform.location, project_to_road=True)
-    if waypoint is None:
+def lane_metrics(carla, world_map, transform) -> tuple[float, float, float]:
+    driving_waypoint = world_map.get_waypoint(
+        transform.location,
+        project_to_road=False,
+        lane_type=carla.LaneType.Driving,
+    )
+    projected_waypoint = driving_waypoint or world_map.get_waypoint(
+        transform.location,
+        project_to_road=True,
+        lane_type=carla.LaneType.Driving,
+    )
+    if projected_waypoint is None:
         return 0.0, 0.0, 1.0
-    dx = transform.location.x - waypoint.transform.location.x
-    dy = transform.location.y - waypoint.transform.location.y
-    yaw = np.deg2rad(waypoint.transform.rotation.yaw)
+    dx = transform.location.x - projected_waypoint.transform.location.x
+    dy = transform.location.y - projected_waypoint.transform.location.y
+    yaw = np.deg2rad(projected_waypoint.transform.rotation.yaw)
     right_x = np.cos(yaw + np.pi / 2)
     right_y = np.sin(yaw + np.pi / 2)
     lane_offset = dx * right_x + dy * right_y
-    heading_error = np.deg2rad(transform.rotation.yaw - waypoint.transform.rotation.yaw)
+    heading_error = np.deg2rad(transform.rotation.yaw - projected_waypoint.transform.rotation.yaw)
     heading_error = float(np.arctan2(np.sin(heading_error), np.cos(heading_error)))
-    lane_half_width = max(float(waypoint.lane_width) / 2.0, 0.1)
-    offroad = float(abs(lane_offset) > lane_half_width + 0.4)
+    lane_half_width = max(float(projected_waypoint.lane_width) / 2.0, 0.1)
+    offroad = float(driving_waypoint is None or abs(lane_offset) > lane_half_width + 0.4)
     return float(lane_offset), heading_error, offroad
 
 
 def vehicle_speed(vehicle) -> float:
     v = vehicle.get_velocity()
     return float((v.x * v.x + v.y * v.y + v.z * v.z) ** 0.5)
+
+
+def summarize_episode(records: list[FrameRecord]) -> dict[str, Any]:
+    frames = len(records)
+    if frames == 0:
+        return {
+            "frames": 0,
+            "progress_m": 0.0,
+            "collision_frames": 0,
+            "offroad_frames": 0,
+            "red_light_frames": 0,
+            "blocked_frames": 0,
+            "offroad_fraction": 1.0,
+            "red_light_fraction": 1.0,
+            "blocked_fraction": 1.0,
+            "mean_speed_mps": 0.0,
+            "max_abs_lane_offset_m": 0.0,
+        }
+    collision_frames = int(sum(record.collision > 0 for record in records))
+    offroad_frames = int(sum(record.offroad > 0 for record in records))
+    red_light_frames = int(sum(record.red_light > 0 for record in records))
+    blocked_frames = int(sum(record.blocked > 0 for record in records))
+    return {
+        "frames": frames,
+        "progress_m": float(records[-1].route_progress_m),
+        "collision_frames": collision_frames,
+        "offroad_frames": offroad_frames,
+        "red_light_frames": red_light_frames,
+        "blocked_frames": blocked_frames,
+        "offroad_fraction": float(offroad_frames / frames),
+        "red_light_fraction": float(red_light_frames / frames),
+        "blocked_fraction": float(blocked_frames / frames),
+        "mean_speed_mps": float(np.mean([record.speed_mps for record in records])),
+        "max_abs_lane_offset_m": float(max(abs(record.lane_offset_m) for record in records)),
+    }
+
+
+def episode_quality_failures(stats: dict[str, Any], quality_cfg: dict[str, Any]) -> list[str]:
+    if not bool(quality_cfg.get("enabled", True)):
+        return []
+    failures = []
+    if stats["progress_m"] < float(quality_cfg.get("min_progress_m", 0.0)):
+        failures.append(f"progress_m={stats['progress_m']:.2f}")
+    if stats["collision_frames"] > int(quality_cfg.get("max_collision_frames", 0)):
+        failures.append(f"collision_frames={stats['collision_frames']}")
+    if stats["offroad_fraction"] > float(quality_cfg.get("max_offroad_fraction", 1.0)):
+        failures.append(f"offroad_fraction={stats['offroad_fraction']:.4f}")
+    if stats["red_light_fraction"] > float(quality_cfg.get("max_red_light_fraction", 1.0)):
+        failures.append(f"red_light_fraction={stats['red_light_fraction']:.4f}")
+    if stats["blocked_fraction"] > float(quality_cfg.get("max_blocked_fraction", 1.0)):
+        failures.append(f"blocked_fraction={stats['blocked_fraction']:.4f}")
+    return failures
 
 
 def append_episode(
@@ -191,6 +260,7 @@ def run_collection(cfg: dict[str, Any]) -> Path:
         world.apply_settings(settings)
         traffic_manager.set_synchronous_mode(True)
         traffic_manager.set_random_device_seed(int(scenario["traffic_manager_seed"]))
+        simplify_traffic_lights(carla, world, scenario)
         client.start_recorder(str(recorder_path), True)
 
         spawn_indices = list(scenario["spawn_point_indices"])
@@ -201,9 +271,15 @@ def run_collection(cfg: dict[str, Any]) -> Path:
         if cfg.get("_override_seconds") is not None:
             episode_seconds = float(cfg["_override_seconds"])
         steps_per_episode = int(round(episode_seconds / float(scenario["fixed_delta_seconds"])))
+        quality_cfg = dict(scenario.get("quality_gate", {}))
+        max_attempts = int(quality_cfg.get("max_attempts", max(episodes, episodes * max(1, len(spawn_indices)) * 2)))
+        rejected_episodes: list[dict[str, Any]] = []
 
-        for episode in range(episodes):
-            ego = spawn_ego(carla, world, spawn_indices[episode % len(spawn_indices)])
+        accepted_episodes = 0
+        attempted_episodes = 0
+        while accepted_episodes < episodes and attempted_episodes < max_attempts:
+            spawn_index = spawn_indices[attempted_episodes % len(spawn_indices)]
+            ego = spawn_ego(carla, world, spawn_index)
             actors.append(ego)
             camera = make_camera(carla, world, ego, cfg)
             actors.append(camera)
@@ -221,7 +297,8 @@ def run_collection(cfg: dict[str, Any]) -> Path:
             ep_proprio: list[np.ndarray] = []
             ep_records: list[FrameRecord] = []
             start_loc = ego.get_location()
-            last_progress = 0.0
+            previous_loc = start_loc
+            travelled_distance = 0.0
             blocked_count = 0
 
             for _ in range(steps_per_episode):
@@ -236,10 +313,12 @@ def run_collection(cfg: dict[str, Any]) -> Path:
                     blocked_count += 1
                 else:
                     blocked_count = 0
-                progress = float(((loc.x - start_loc.x) ** 2 + (loc.y - start_loc.y) ** 2) ** 0.5)
-                progress = max(progress, last_progress)
-                last_progress = progress
-                lane_offset, heading_error, offroad = lane_metrics(world.get_map(), transform)
+                travelled_distance += float(
+                    ((loc.x - previous_loc.x) ** 2 + (loc.y - previous_loc.y) ** 2 + (loc.z - previous_loc.z) ** 2) ** 0.5
+                )
+                previous_loc = loc
+                progress = travelled_distance
+                lane_offset, heading_error, offroad = lane_metrics(carla, world.get_map(), transform)
                 control = ego.get_control()
                 at_red = float(ego.is_at_traffic_light() and ego.get_traffic_light_state() == carla.TrafficLightState.Red)
                 collided = float(collision_frame["last"] == frame_id)
@@ -265,25 +344,48 @@ def run_collection(cfg: dict[str, Any]) -> Path:
                     )
                 )
 
-            global_step = append_episode(
-                cfg,
-                episode_idx=episode,
-                pixels=ep_pixels,
-                actions=ep_actions,
-                state=ep_state,
-                proprio=ep_proprio,
-                records=ep_records,
-                route_id=spawn_indices[episode % len(spawn_indices)],
-                weather_id=0,
-                output=output,
-                global_step=global_step,
-            )
+            stats = summarize_episode(ep_records)
+            failures = episode_quality_failures(stats, quality_cfg)
+            accepted = not failures
+            event = {
+                "event": "episode_quality",
+                "attempt": attempted_episodes,
+                "accepted_episode": accepted_episodes if accepted else None,
+                "accepted": accepted,
+                "spawn_index": spawn_index,
+                "failures": failures,
+                **stats,
+            }
+            print(json.dumps(event, sort_keys=True), flush=True)
+            if accepted:
+                global_step = append_episode(
+                    cfg,
+                    episode_idx=accepted_episodes,
+                    pixels=ep_pixels,
+                    actions=ep_actions,
+                    state=ep_state,
+                    proprio=ep_proprio,
+                    records=ep_records,
+                    route_id=spawn_index,
+                    weather_id=0,
+                    output=output,
+                    global_step=global_step,
+                )
+                accepted_episodes += 1
+            else:
+                rejected_episodes.append(event)
             collision_sensor.stop()
             camera.stop()
             collision_sensor.destroy()
             camera.destroy()
             ego.destroy()
             actors.clear()
+            attempted_episodes += 1
+        if accepted_episodes < episodes:
+            raise RuntimeError(
+                f"Accepted only {accepted_episodes}/{episodes} episodes after {attempted_episodes} attempts; "
+                f"last rejections={rejected_episodes[-3:]}"
+            )
     finally:
         try:
             client.stop_recorder()
@@ -303,6 +405,8 @@ def run_collection(cfg: dict[str, Any]) -> Path:
         "camera": cfg["camera"],
         "num_episodes": len(output["ep_len"]),
         "num_frames": len(output["pixels"]),
+        "attempted_episodes": attempted_episodes,
+        "rejected_episodes": rejected_episodes,
         "created_at": time.time(),
     }
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")

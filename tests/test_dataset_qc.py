@@ -23,6 +23,7 @@ def make_dataset(path: Path, frames: int = 12) -> None:
         f.create_dataset("collision", data=np.zeros(frames, dtype=np.float32))
         f.create_dataset("offroad", data=np.zeros(frames, dtype=np.float32))
         f.create_dataset("red_light", data=np.zeros(frames, dtype=np.float32))
+        f.create_dataset("blocked", data=np.zeros(frames, dtype=np.float32))
 
 
 def test_validate_hdf5_passes_valid_dataset(tmp_path):
@@ -41,3 +42,18 @@ def test_validate_hdf5_fails_blank_frame(tmp_path):
         f["pixels"][0] = 0
     report = validate_hdf5(dataset, tmp_path / "qc_blank", sample_frames=12)
     assert report["gate"] == "fail"
+
+
+def test_validate_hdf5_quality_thresholds_fail_dirty_dataset(tmp_path):
+    dataset = tmp_path / "dirty.h5"
+    make_dataset(dataset)
+    with h5py.File(dataset, "a") as f:
+        f["offroad"][:3] = 1
+    report = validate_hdf5(
+        dataset,
+        tmp_path / "qc_dirty",
+        sample_frames=4,
+        max_offroad_frame_frac=0.01,
+    )
+    assert report["gate"] == "fail"
+    assert report["summary"]["offroad_frames"] == 3

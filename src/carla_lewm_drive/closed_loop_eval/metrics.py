@@ -11,6 +11,7 @@ class DrivingEpisodeMetrics:
     offroad_count: int = 0
     red_light_count: int = 0
     blocked_count: int = 0
+    first_infraction_distance_m: float | None = None
 
     @property
     def route_completion_pct(self) -> float:
@@ -20,7 +21,8 @@ class DrivingEpisodeMetrics:
 
     @property
     def first_infraction_free_distance_m(self) -> float:
-        return max(0.0, min(self.route_progress_m, self.route_length_m))
+        distance = self.route_progress_m if self.first_infraction_distance_m is None else self.first_infraction_distance_m
+        return max(0.0, min(distance, self.route_length_m))
 
     @property
     def infraction_penalty(self) -> float:

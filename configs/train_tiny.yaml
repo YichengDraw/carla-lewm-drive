@@ -44,4 +44,5 @@ wandb:
   entity: yicheng132024-southern-university-of-science-technology
   project: carla-lewm-drive
   group: d0-tiny
+  resume: never
   mode: online

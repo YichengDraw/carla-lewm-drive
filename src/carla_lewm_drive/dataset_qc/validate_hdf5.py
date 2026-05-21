@@ -27,11 +27,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, default=Path("outputs/qc"))
     parser.add_argument("--sample-frames", type=int, default=64)
+    parser.add_argument("--max-collision-frames", type=int, default=0)
+    parser.add_argument("--max-offroad-frame-frac", type=float, default=0.01)
+    parser.add_argument("--max-red-light-frame-frac", type=float, default=0.0)
+    parser.add_argument("--max-blocked-frame-frac", type=float, default=0.10)
+    parser.add_argument("--allow-infractions", action="store_true", help="Disable default D0-clean infraction thresholds.")
     parser.add_argument("--strict", action="store_true", help="Exit non-zero when hard quality gates fail.")
     return parser.parse_args()
 
 
-def validate_hdf5(dataset_path: Path, out_dir: Path, sample_frames: int = 64) -> dict:
+def validate_hdf5(
+    dataset_path: Path,
+    out_dir: Path,
+    sample_frames: int = 64,
+    *,
+    max_collision_frames: int | None = None,
+    max_offroad_frame_frac: float | None = None,
+    max_red_light_frame_frac: float | None = None,
+    max_blocked_frame_frac: float | None = None,
+) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     issues: list[QCIssue] = []
     frame_rows: list[dict] = []
@@ -107,16 +121,60 @@ def validate_hdf5(dataset_path: Path, out_dir: Path, sample_frames: int = 64) ->
             if mean < 2 or mean > 253 or std < 2:
                 issues.append(QCIssue("hard", "pixels", ep, step, f"suspicious blank frame mean={mean:.2f} std={std:.2f}"))
 
+        collision_frames = int(f["collision"][:].sum()) if "collision" in f else 0
+        offroad_frames = int(f["offroad"][:].sum()) if "offroad" in f else 0
+        red_light_frames = int(f["red_light"][:].sum()) if "red_light" in f else 0
+        blocked_frames = int(f["blocked"][:].sum()) if "blocked" in f else 0
         summary = {
             "dataset": str(dataset_path),
             "frames": n,
             "episodes": int(len(ep_len)),
             "hard_issue_count": sum(1 for x in issues if x.severity == "hard"),
             "soft_issue_count": sum(1 for x in issues if x.severity == "soft"),
-            "collision_frames": int(f["collision"][:].sum()) if "collision" in f else 0,
-            "offroad_frames": int(f["offroad"][:].sum()) if "offroad" in f else 0,
-            "red_light_frames": int(f["red_light"][:].sum()) if "red_light" in f else 0,
+            "collision_frames": collision_frames,
+            "offroad_frames": offroad_frames,
+            "red_light_frames": red_light_frames,
+            "blocked_frames": blocked_frames,
+            "offroad_frame_frac": float(offroad_frames / max(n, 1)),
+            "red_light_frame_frac": float(red_light_frames / max(n, 1)),
+            "blocked_frame_frac": float(blocked_frames / max(n, 1)),
         }
+        if max_collision_frames is not None and collision_frames > max_collision_frames:
+            issues.append(
+                QCIssue("hard", "collision", None, None, f"collision_frames={collision_frames} exceeds {max_collision_frames}")
+            )
+        if max_offroad_frame_frac is not None and summary["offroad_frame_frac"] > max_offroad_frame_frac:
+            issues.append(
+                QCIssue(
+                    "hard",
+                    "offroad",
+                    None,
+                    None,
+                    f"offroad_frame_frac={summary['offroad_frame_frac']:.4f} exceeds {max_offroad_frame_frac}",
+                )
+            )
+        if max_red_light_frame_frac is not None and summary["red_light_frame_frac"] > max_red_light_frame_frac:
+            issues.append(
+                QCIssue(
+                    "hard",
+                    "red_light",
+                    None,
+                    None,
+                    f"red_light_frame_frac={summary['red_light_frame_frac']:.4f} exceeds {max_red_light_frame_frac}",
+                )
+            )
+        if max_blocked_frame_frac is not None and summary["blocked_frame_frac"] > max_blocked_frame_frac:
+            issues.append(
+                QCIssue(
+                    "hard",
+                    "blocked",
+                    None,
+                    None,
+                    f"blocked_frame_frac={summary['blocked_frame_frac']:.4f} exceeds {max_blocked_frame_frac}",
+                )
+            )
+        summary["hard_issue_count"] = sum(1 for x in issues if x.severity == "hard")
+        summary["soft_issue_count"] = sum(1 for x in issues if x.severity == "soft")
         write_contact_sheet(f["pixels"], sample_indices, out_dir / "contact_sheet.jpg")
 
     return write_report(dataset_path, out_dir, issues, frame_rows, summary)
@@ -159,7 +217,19 @@ def write_report(dataset_path: Path, out_dir: Path, issues: list[QCIssue], frame
 
 def main() -> None:
     args = parse_args()
-    report = validate_hdf5(args.dataset, args.out_dir, args.sample_frames)
+    max_collision_frames = None if args.allow_infractions else args.max_collision_frames
+    max_offroad_frame_frac = None if args.allow_infractions else args.max_offroad_frame_frac
+    max_red_light_frame_frac = None if args.allow_infractions else args.max_red_light_frame_frac
+    max_blocked_frame_frac = None if args.allow_infractions else args.max_blocked_frame_frac
+    report = validate_hdf5(
+        args.dataset,
+        args.out_dir,
+        args.sample_frames,
+        max_collision_frames=max_collision_frames,
+        max_offroad_frame_frac=max_offroad_frame_frac,
+        max_red_light_frame_frac=max_red_light_frame_frac,
+        max_blocked_frame_frac=max_blocked_frame_frac,
+    )
     print(json.dumps(report["summary"], indent=2, sort_keys=True))
     if args.strict and report["gate"] != "pass":
         raise SystemExit(2)

@@ -10,6 +10,18 @@ def test_mini_driving_score_penalizes_infractions():
     assert crash.mini_driving_score < clean.mini_driving_score
 
 
+def test_infraction_free_distance_uses_first_infraction_distance():
+    row = DrivingEpisodeMetrics(
+        route_length_m=500.0,
+        route_progress_m=250.0,
+        collision_count=1,
+        first_infraction_distance_m=40.0,
+    )
+
+    assert row.route_completion_pct == 50.0
+    assert row.first_infraction_free_distance_m == 40.0
+
+
 def test_aggregate_metrics():
     rows = [
         DrivingEpisodeMetrics(route_length_m=100.0, route_progress_m=100.0),

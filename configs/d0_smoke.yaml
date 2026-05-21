@@ -1,6 +1,6 @@
 scenario:
   label: D0-smoke
-  description: Single-ego daytime dry-road collection for pipeline validation.
+  description: Single-ego daytime dry-road collection on the clean Town03 spawn-3 route.
   carla_version: 0.9.16
   host: 127.0.0.1
   port: 2000
@@ -13,10 +13,19 @@ scenario:
   vehicles: 0
   walkers: 0
   weather: ClearNoon
-  spawn_point_indices: [0, 3, 7, 11]
+  force_green_lights: true
+  spawn_point_indices: [3]
   episodes: 20
   episode_seconds: 30.0
   target_speed_kmh: 20.0
+  quality_gate:
+    enabled: true
+    max_attempts: 40
+    min_progress_m: 160.0
+    max_collision_frames: 0
+    max_offroad_fraction: 0.01
+    max_red_light_fraction: 0.0
+    max_blocked_fraction: 0.10
 
 camera:
   image_width: 224

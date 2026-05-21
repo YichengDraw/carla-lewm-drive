@@ -1,26 +1,58 @@
 eval:
-  label: d0_heldout_longdrive
+  label: d0_simplified_closed_loop
+  policy: checkpoint
   dataset_path: data/d0_train/carla_d0_train.h5
   checkpoint_path: outputs/d0_tiny_h3_fs5/best.pt
   output_dir: outputs/d0_eval
   host: 127.0.0.1
   port: 2000
+  timeout_s: 10.0
   town: Town03
+  load_world: true
   fixed_delta_seconds: 0.05
+  traffic_manager_port: 8000
+  traffic_manager_seed: 20260522
   weather: ClearNoon
-  route_spawn_indices: [2, 5, 13, 17, 29]
+  force_green_lights: true
+  route_spawn_indices: [3]
   route_cap_m: 500.0
   target_speed_kmh: 20.0
   max_episode_seconds: 120.0
-  eval_episodes: 20
+  eval_episodes: 5
+  blocked_speed_mps: 0.1
+  blocked_seconds: 3.0
+  blocked_grace_seconds: 5.0
+  red_light_speed_threshold_mps: 0.2
+  stop_on_collision: true
+  stop_on_blocked: true
+  model_warmup_action: [0.0, 0.0, 1.0]
+  save_contact_sheet: true
+  contact_sheet_every: 25
+  max_contact_sheet_frames: 48
+  save_frames: false
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
 
 planner:
+  seed: 3072
   horizon: 8
   receding_horizon: 1
   num_samples: 512
   elite_frac: 0.1
   iterations: 4
+  action_mean: [0.35, 0.0, 0.0]
   action_std: [0.25, 0.35, 0.20]
+  min_action_std: 0.0001
   cost:
     progress_reward: 1.0
     lane_offset_penalty: 2.0
@@ -29,4 +61,5 @@ planner:
     collision_penalty: 100.0
     offroad_penalty: 60.0
     red_light_penalty: 80.0
+    blocked_penalty: 100.0
     action_smoothness_penalty: 0.05
