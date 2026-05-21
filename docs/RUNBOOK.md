@@ -2,7 +2,7 @@
 
 ## Phase 0
 
-```bash
+```powershell
 $env:PYTHONPATH="src"
 python -m py_compile (Get-ChildItem -Recurse -Path src,tests -Filter *.py | ForEach-Object { $_.FullName })
 python -m pytest
