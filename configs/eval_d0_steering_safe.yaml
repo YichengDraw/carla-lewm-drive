@@ -1,0 +1,73 @@
+eval:
+  label: d0_steering_safe_closed_loop
+  policy: checkpoint
+  dataset_path: data/d0_train/carla_d0_train.h5
+  checkpoint_path: outputs/d0_tiny_h3_fs5_delta_predaux_e5/best.pt
+  output_dir: outputs/d0_eval_steering_safe
+  host: 127.0.0.1
+  port: 2100
+  timeout_s: 10.0
+  town: Town03
+  load_world: true
+  fixed_delta_seconds: 0.05
+  traffic_manager_port: 8100
+  traffic_manager_seed: 20260522
+  weather: ClearNoon
+  force_green_lights: true
+  route_spawn_indices: [3]
+  route_cap_m: 150.0
+  target_speed_kmh: 20.0
+  max_episode_seconds: 50.0
+  eval_episodes: 1
+  blocked_speed_mps: 0.1
+  blocked_seconds: 3.0
+  blocked_grace_seconds: 5.0
+  max_sim_delta_multiplier: 2.5
+  red_light_speed_threshold_mps: 0.2
+  stop_on_collision: true
+  stop_on_blocked: true
+  model_warmup_action: [0.0, 0.0, 1.0]
+  constant_action: [0.45, 0.0, 0.0]
+  save_contact_sheet: true
+  contact_sheet_every: 25
+  max_contact_sheet_frames: 48
+  save_frames: false
+  save_action_trace: true
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+planner:
+  seed: 3072
+  horizon: 1
+  receding_horizon: 1
+  num_samples: 128
+  elite_frac: 0.1
+  iterations: 3
+  action_mean: [0.45, 0.0, 0.0]
+  action_std: [0.12, 0.002, 0.0]
+  action_low: [0.25, -0.004, 0.0]
+  action_high: [0.70, 0.004, 0.0]
+  exclusive_throttle_brake: true
+  min_action_std: 0.0001
+  cost:
+    progress_reward: 1.0
+    lane_offset_penalty: 12.0
+    heading_penalty: 4.0
+    speed_error_penalty: 0.25
+    collision_penalty: 100.0
+    offroad_penalty: 100.0
+    red_light_penalty: 80.0
+    blocked_penalty: 100.0
+    action_smoothness_penalty: 0.0
+    brake_penalty: 5.0
+    throttle_brake_conflict_penalty: 50.0
