@@ -220,9 +220,11 @@ class EpisodeAccumulator:
     offroad_count: int = 0
     red_light_count: int = 0
     blocked_count: int = 0
+    speed_limit_count: int = 0
     offroad_active: bool = False
     red_light_active: bool = False
     blocked_active: bool = False
+    speed_limit_active: bool = False
 
     def _mark_first_infraction(self) -> None:
         if self.first_infraction_distance_m is None:
@@ -249,6 +251,7 @@ class EpisodeAccumulator:
             offroad_count=self.offroad_count,
             red_light_count=self.red_light_count,
             blocked_count=self.blocked_count,
+            speed_limit_count=self.speed_limit_count,
             first_infraction_distance_m=self.first_infraction_distance_m,
         )
 
@@ -326,6 +329,7 @@ def write_metrics(output_dir: Path, rows: list[DrivingEpisodeMetrics]) -> dict[s
                 "offroad_count",
                 "red_light_count",
                 "blocked_count",
+                "speed_limit_count",
             ],
         )
         writer.writeheader()
@@ -342,6 +346,7 @@ def write_metrics(output_dir: Path, rows: list[DrivingEpisodeMetrics]) -> dict[s
                     "offroad_count": row.offroad_count,
                     "red_light_count": row.red_light_count,
                     "blocked_count": row.blocked_count,
+                    "speed_limit_count": row.speed_limit_count,
                 }
             )
     summary = aggregate_metrics(rows)
@@ -368,6 +373,7 @@ def write_action_trace(output_dir: Path, episode_idx: int, rows: list[dict[str, 
         "lane_offset_m",
         "heading_error_rad",
         "offroad",
+        "speed_limit_violation",
         "blocked",
         "collision_count",
     ]
@@ -524,6 +530,17 @@ def lane_keep_action(lane_offset_m: float, heading_error_rad: float, speed_mps: 
     return np.asarray([throttle, lane_keep_steer(lane_offset_m, heading_error_rad, eval_cfg), brake], dtype=np.float32)
 
 
+def maybe_govern_model_speed(action: np.ndarray, lane_offset_m: float, heading_error_rad: float, speed_mps: float, eval_cfg: dict[str, Any]) -> np.ndarray:
+    lane_cfg = eval_cfg.get("lane_keep", {})
+    if not bool(lane_cfg.get("govern_model_speed", False)):
+        return np.asarray(action, dtype=np.float32)
+    governed = lane_keep_action(lane_offset_m, heading_error_rad, speed_mps, eval_cfg)
+    out = np.asarray(action, dtype=np.float32).copy()
+    out[0] = min(float(out[0]), float(governed[0]))
+    out[2] = max(float(out[2]), float(governed[2]))
+    return out
+
+
 def preprocess_pixels(frames: list[np.ndarray], image_size: int, device: torch.device) -> torch.Tensor:
     if not frames:
         raise ValueError("Need at least one RGB frame for model policy")
@@ -605,6 +622,7 @@ def run_episode(
     collision_events = {"count": 0}
     last_collision_count = 0
     blocked_seconds = 0.0
+    speed_limit_seconds = 0.0
     step = 0
     last_sim_time: float | None = None
     last_wall_time: float | None = None
@@ -654,7 +672,13 @@ def run_episode(
                 history_actions = torch.from_numpy(hist).unsqueeze(0).float()
                 action = planner.propose(model, pixels, history_actions, device)
                 if policy == "model_lane_keep":
-                    action = np.asarray(action, dtype=np.float32).copy()
+                    action = maybe_govern_model_speed(
+                        action,
+                        pre_lane_offset,
+                        pre_heading_error,
+                        current_speed,
+                        eval_cfg,
+                    ).copy()
                     action[1] = lane_keep_steer(pre_lane_offset, pre_heading_error, eval_cfg)
                 block_actions = [action for _ in range(frameskip)]
             elif policy == "lane_keep":
@@ -709,10 +733,21 @@ def run_episode(
                     and ego.get_traffic_light_state() == carla.TrafficLightState.Red
                     and speed > float(eval_cfg.get("red_light_speed_threshold_mps", 0.2))
                 )
+                speed_limit_kmh = eval_cfg.get("speed_limit_kmh")
+                if speed_limit_kmh is None:
+                    speed_limit_violation = False
+                    speed_limit_seconds = 0.0
+                elif speed > float(speed_limit_kmh) / 3.6:
+                    speed_limit_seconds += fixed_delta
+                    speed_limit_violation = speed_limit_seconds >= float(eval_cfg.get("speed_limit_seconds", 1.0))
+                else:
+                    speed_limit_seconds = 0.0
+                    speed_limit_violation = False
 
                 acc.update_flag("offroad", bool(offroad))
                 acc.update_flag("red_light", red_light)
                 acc.update_flag("blocked", blocked)
+                acc.update_flag("speed_limit", speed_limit_violation)
                 if bool(eval_cfg.get("save_action_trace", True)):
                     action_trace.append(
                         {
@@ -729,6 +764,7 @@ def run_episode(
                             "lane_offset_m": float(lane_offset),
                             "heading_error_rad": float(heading_error),
                             "offroad": int(bool(offroad)),
+                            "speed_limit_violation": int(bool(speed_limit_violation)),
                             "blocked": int(bool(blocked)),
                             "collision_count": int(acc.collision_count),
                         }
@@ -740,6 +776,8 @@ def run_episode(
                 if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
                     break
                 if bool(eval_cfg.get("stop_on_blocked", True)) and blocked:
+                    break
+                if bool(eval_cfg.get("stop_on_speed_limit", False)) and acc.speed_limit_count > 0:
                     break
                 if step >= max_steps or acc.route_progress_m >= route_length_m:
                     break
@@ -754,6 +792,8 @@ def run_episode(
             if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
                 break
             if bool(eval_cfg.get("stop_on_blocked", True)) and acc.blocked_count > 0:
+                break
+            if bool(eval_cfg.get("stop_on_speed_limit", False)) and acc.speed_limit_count > 0:
                 break
     finally:
         for actor in reversed(actors):
@@ -848,6 +888,7 @@ def run_closed_loop_eval(cfg: dict[str, Any], checkpoint_path: Path | None, poli
                         "offroad_count": row.offroad_count,
                         "red_light_count": row.red_light_count,
                         "blocked_count": row.blocked_count,
+                        "speed_limit_count": row.speed_limit_count,
                     },
                     sort_keys=True,
                 ),

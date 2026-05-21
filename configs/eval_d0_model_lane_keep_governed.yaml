@@ -1,9 +1,9 @@
 eval:
-  label: d0_model_lane_keep_closed_loop
+  label: d0_model_lane_keep_governed_closed_loop
   policy: model_lane_keep
   dataset_path: data/d0_train/carla_d0_train.h5
   checkpoint_path: outputs/d0_tiny_h3_fs5_delta_predaux_e5/best.pt
-  output_dir: outputs/d0_eval_model_lane_keep_200m
+  output_dir: outputs/d0_eval_model_lane_keep_governed_200m
   host: 127.0.0.1
   port: 2100
   timeout_s: 10.0
@@ -36,12 +36,13 @@ eval:
   save_frames: false
   save_action_trace: true
   lane_keep:
-    throttle: 0.42
-    speed_kp: 0.04
-    throttle_min: 0.20
-    throttle_max: 0.60
-    overspeed_margin_mps: 2.0
-    brake_kp: 0.08
+    govern_model_speed: true
+    throttle: 0.40
+    speed_kp: 0.05
+    throttle_min: 0.00
+    throttle_max: 0.50
+    overspeed_margin_mps: 1.0
+    brake_kp: 0.10
     steer_bias: 0.0
     lane_offset_gain: 0.18
     heading_error_gain: 1.0

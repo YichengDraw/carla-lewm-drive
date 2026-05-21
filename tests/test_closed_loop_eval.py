@@ -11,6 +11,7 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     expand_action_to_model_dim,
     lane_keep_action,
     lane_keep_steer,
+    maybe_govern_model_speed,
     normalize_policy,
     run_dry_eval,
     write_action_trace,
@@ -139,6 +140,30 @@ def test_lane_keep_action_uses_speed_control_and_brake_when_overspeeding():
     assert fast[2] > 0.0
 
 
+def test_model_speed_governor_caps_throttle_and_raises_brake():
+    eval_cfg = {
+        "target_speed_kmh": 18.0,
+        "lane_keep": {
+            "govern_model_speed": True,
+            "throttle": 0.4,
+            "speed_kp": 0.05,
+            "overspeed_margin_mps": 1.0,
+            "brake_kp": 0.1,
+        },
+    }
+
+    governed = maybe_govern_model_speed(
+        np.array([0.7, 0.0, 0.0], dtype=np.float32),
+        lane_offset_m=0.0,
+        heading_error_rad=0.0,
+        speed_mps=8.0,
+        eval_cfg=eval_cfg,
+    )
+
+    assert governed[0] == pytest.approx(0.0)
+    assert governed[2] > 0.0
+
+
 def test_write_metrics_outputs_episode_csv_and_summary(tmp_path):
     row = DrivingEpisodeMetrics(
         route_length_m=100.0,
@@ -172,6 +197,7 @@ def test_write_action_trace_outputs_stepwise_control_csv(tmp_path):
                 "lane_offset_m": 0.12,
                 "heading_error_rad": -0.03,
                 "offroad": 0,
+                "speed_limit_violation": 0,
                 "blocked": 0,
                 "collision_count": 0,
             }
@@ -185,6 +211,7 @@ def test_write_action_trace_outputs_stepwise_control_csv(tmp_path):
     assert rows[0]["steer"] == "-0.01"
     assert rows[0]["lane_offset_m"] == "0.12"
     assert rows[0]["heading_error_rad"] == "-0.03"
+    assert rows[0]["speed_limit_violation"] == "0"
 
 
 def test_autopilot_dry_run_does_not_require_checkpoint(tmp_path):

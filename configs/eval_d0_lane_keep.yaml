@@ -24,8 +24,11 @@ eval:
   blocked_grace_seconds: 5.0
   max_sim_delta_multiplier: 2.5
   red_light_speed_threshold_mps: 0.2
+  speed_limit_kmh: 35.0
+  speed_limit_seconds: 1.0
   stop_on_collision: true
   stop_on_blocked: true
+  stop_on_speed_limit: true
   constant_action: [0.45, 0.0, 0.0]
   save_contact_sheet: true
   contact_sheet_every: 25

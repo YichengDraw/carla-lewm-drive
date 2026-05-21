@@ -11,6 +11,7 @@ class DrivingEpisodeMetrics:
     offroad_count: int = 0
     red_light_count: int = 0
     blocked_count: int = 0
+    speed_limit_count: int = 0
     first_infraction_distance_m: float | None = None
 
     @property
@@ -31,6 +32,7 @@ class DrivingEpisodeMetrics:
         penalty *= 0.70 ** self.offroad_count
         penalty *= 0.70 ** self.red_light_count
         penalty *= 0.80 ** self.blocked_count
+        penalty *= 0.85 ** self.speed_limit_count
         return penalty
 
     @property
@@ -39,7 +41,13 @@ class DrivingEpisodeMetrics:
 
     @property
     def hard_failed(self) -> bool:
-        return (self.collision_count + self.offroad_count + self.red_light_count + self.blocked_count) > 0
+        return (
+            self.collision_count
+            + self.offroad_count
+            + self.red_light_count
+            + self.blocked_count
+            + self.speed_limit_count
+        ) > 0
 
 
 def aggregate_metrics(rows: list[DrivingEpisodeMetrics]) -> dict[str, float]:
@@ -56,4 +64,5 @@ def aggregate_metrics(rows: list[DrivingEpisodeMetrics]) -> dict[str, float]:
         "offroad_count": sum(r.offroad_count for r in rows),
         "red_light_count": sum(r.red_light_count for r in rows),
         "blocked_count": sum(r.blocked_count for r in rows),
+        "speed_limit_count": sum(r.speed_limit_count for r in rows),
     }
