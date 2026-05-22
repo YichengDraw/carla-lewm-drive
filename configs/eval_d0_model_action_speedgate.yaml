@@ -48,3 +48,29 @@ camera:
     pitch: -5.0
     yaw: 0.0
     roll: 0.0
+
+planner:
+  seed: 3072
+  horizon: 1
+  receding_horizon: 1
+  num_samples: 512
+  elite_frac: 0.1
+  iterations: 4
+  action_mean: [0.46, -0.013, 0.0]
+  action_std: [0.38, 0.03, 0.08]
+  action_low: [0.0, -0.13, 0.0]
+  action_high: [0.85, 0.02, 0.70]
+  exclusive_throttle_brake: true
+  min_action_std: 0.0001
+  cost:
+    progress_reward: 1.0
+    lane_offset_penalty: 2.0
+    heading_penalty: 0.5
+    speed_error_penalty: 0.25
+    collision_penalty: 100.0
+    offroad_penalty: 60.0
+    red_light_penalty: 80.0
+    blocked_penalty: 100.0
+    action_smoothness_penalty: 0.05
+    brake_penalty: 1.0
+    throttle_brake_conflict_penalty: 20.0
