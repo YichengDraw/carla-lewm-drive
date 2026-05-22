@@ -35,6 +35,7 @@ eval:
   max_contact_sheet_frames: 48
   save_frames: false
   save_action_trace: true
+  exclusive_throttle_brake: true
   lane_keep:
     govern_model_speed: true
     throttle: 0.40

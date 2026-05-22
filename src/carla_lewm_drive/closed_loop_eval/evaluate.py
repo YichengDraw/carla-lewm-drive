@@ -533,8 +533,20 @@ def set_weather(carla, world, weather_name: str) -> None:
     world.set_weather(weather)
 
 
-def to_vehicle_control(carla, action: np.ndarray):
+def sanitize_vehicle_action(action: np.ndarray, eval_cfg: dict[str, Any] | None = None) -> np.ndarray:
     clipped = np.clip(np.asarray(action, dtype=np.float32), DrivingActionBounds().low, DrivingActionBounds().high)
+    if eval_cfg and bool(eval_cfg.get("exclusive_throttle_brake", False)):
+        throttle = float(clipped[0])
+        brake = float(clipped[2])
+        if throttle >= brake:
+            clipped[2] = 0.0
+        else:
+            clipped[0] = 0.0
+    return clipped.astype(np.float32)
+
+
+def to_vehicle_control(carla, action: np.ndarray, eval_cfg: dict[str, Any] | None = None):
+    clipped = sanitize_vehicle_action(action, eval_cfg)
     return carla.VehicleControl(throttle=float(clipped[0]), steer=float(clipped[1]), brake=float(clipped[2]))
 
 
@@ -696,7 +708,7 @@ def run_episode(
             frameskip = action_dim_to_frameskip(int(model.cfg.action_dim))
             for _ in range(int(model.cfg.history_size)):
                 for _raw_step in range(frameskip):
-                    ego.apply_control(to_vehicle_control(carla, idle_action))
+                    ego.apply_control(to_vehicle_control(carla, idle_action, eval_cfg))
                     rgb = wait_rgb(world, image_queue, timeout_s)
                 image_history.append(rgb)
                 action_history.append(expand_action_to_model_dim(idle_action, int(model.cfg.action_dim)))
@@ -754,8 +766,9 @@ def run_episode(
             latest_rgb: np.ndarray | None = None
             for action in block_actions:
                 if action is not None:
-                    ego.apply_control(to_vehicle_control(carla, action))
-                    block_raw_actions.append(np.asarray(action, dtype=np.float32))
+                    applied_action = sanitize_vehicle_action(action, eval_cfg)
+                    ego.apply_control(to_vehicle_control(carla, applied_action))
+                    block_raw_actions.append(applied_action)
                 rgb, frame_id, sim_time = wait_rgb_packet(world, image_queue, timeout_s)
                 wall_time = time.perf_counter()
                 latest_rgb = rgb
