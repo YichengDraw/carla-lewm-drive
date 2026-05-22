@@ -162,6 +162,7 @@ TRAIN_PID=<train-pid> tmux new-session -d -s carla_action10k_watch \
 ```
 
 The watcher logs to `outputs/d0_tiny_h3_fs5_delta_predaux_action_10k/watch_eval.log`, records health snapshots every five minutes, then runs the pure action-policy and lane-guarded action-policy closed-loop checks after training exits.
+For follow-up runs, override `RUN_DIR`, `RUN_NAME`, `CHECKPOINT_PATH`, `PURE_EVAL_DIR`, and `LANE_EVAL_DIR` so the watcher evaluates the new checkpoint.
 
 Gate:
 

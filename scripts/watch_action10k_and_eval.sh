@@ -13,6 +13,7 @@ PURE_EVAL_CONFIG="${PURE_EVAL_CONFIG:-configs/eval_d0_model_action_speedgate.yam
 LANE_EVAL_CONFIG="${LANE_EVAL_CONFIG:-configs/eval_d0_model_action_lane_keep_speedgate.yaml}"
 PURE_EVAL_DIR="${PURE_EVAL_DIR:-outputs/d0_eval_tiny_model_action_speedgate_200m}"
 LANE_EVAL_DIR="${LANE_EVAL_DIR:-outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m}"
+CHECKPOINT_PATH="${CHECKPOINT_PATH:-}"
 
 mkdir -p "$RUN_DIR"
 LOG_PATH="$RUN_DIR/watch_eval.log"
@@ -74,16 +75,22 @@ else
 fi
 
 export PYTHONPATH="${PYTHONPATH:-src}"
+checkpoint_args=()
+if [[ -n "$CHECKPOINT_PATH" ]]; then
+  checkpoint_args=(--checkpoint "$CHECKPOINT_PATH")
+fi
 
 log "running pure model_action evaluation"
 .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config "$PURE_EVAL_CONFIG" \
-  --output-dir "$PURE_EVAL_DIR"
+  --output-dir "$PURE_EVAL_DIR" \
+  "${checkpoint_args[@]}"
 
 log "running model_action_lane_keep evaluation"
 .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config "$LANE_EVAL_CONFIG" \
-  --output-dir "$LANE_EVAL_DIR"
+  --output-dir "$LANE_EVAL_DIR" \
+  "${checkpoint_args[@]}"
 
 if [[ "$started_carla" == "1" ]]; then
   log "stopping CARLA session $CARLA_SESSION"
