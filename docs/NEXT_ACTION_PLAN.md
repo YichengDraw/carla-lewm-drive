@@ -65,6 +65,16 @@ Expected scale:
 
 ## Evaluation Commands
 
+Automatic remote watcher:
+
+```bash
+cd /home/ubuntu/carla_lewm_drive
+TRAIN_PID=<train-pid> tmux new-session -d -s carla_action10k_watch \
+  "scripts/watch_action10k_and_eval.sh"
+```
+
+The watcher writes `outputs/d0_tiny_h3_fs5_delta_predaux_action_10k/watch_eval.log`, records 5-minute health snapshots, waits for training to finish, starts CARLA on port 2100 if needed, and runs the two 200m closed-loop evaluations below.
+
 Pure action head:
 
 ```bash

@@ -140,6 +140,16 @@ python -m carla_lewm_drive.driving_lewm.train \
   --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
 ```
 
+Attach the automatic watcher and evaluation handoff:
+
+```bash
+cd /home/ubuntu/carla_lewm_drive
+TRAIN_PID=<train-pid> tmux new-session -d -s carla_action10k_watch \
+  "scripts/watch_action10k_and_eval.sh"
+```
+
+The watcher logs to `outputs/d0_tiny_h3_fs5_delta_predaux_action_10k/watch_eval.log`, records health snapshots every five minutes, then runs the pure action-policy and lane-guarded action-policy closed-loop checks after training exits.
+
 Gate:
 
 - W&B URL appears at launch.
