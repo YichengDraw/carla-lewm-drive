@@ -8,9 +8,9 @@ The first strict D0 pass is complete end to end: clean CARLA data was collected,
 
 The current valid model-only success claim is intentionally narrow: on an isolated CARLA server and a throttle-only D0 target, the latest tiny and small delta/pred-aux checkpoints reach 190m with no hard infractions. At 200m they fail by off-road at 191.75m and 191.67m, and steering-safe 150m still fails at 107.63m and 103.42m.
 
-The new 200m pass is a governed hybrid sanity result: tiny LeWM stays in the loop for throttle/brake planning, while lane keeping and speed limiting are guarded by deterministic feedback. Without the speed governor, the same hybrid fails the fair speed-gated metric at 24.17m from speeding.
+The first 200m pass is a governed hybrid sanity result: tiny LeWM stays in the loop for throttle/brake planning, while lane keeping and speed limiting are guarded by deterministic feedback. Without the speed governor, the same hybrid fails the fair speed-gated metric at 24.17m from speeding.
 
-The active implementation branch now adds a latent action-prior head, step-based training, and action-policy evaluation configs. The planned run is `d0_tiny_h3_fs5_delta_predaux_action_10k`, capped at 10,000 optimizer steps.
+The action-prior branch has now run for 10,000 optimizer steps. It improved offline action prediction, but closed-loop control still needs action decoding constraints: raw action policy was blocked at about 0.003m, throttle/brake exclusivity lifted pure action to 24.84m before speed violation, and action+lane-keep reached 157.69m before blocked. With throttle/brake exclusivity plus speed-governor brake release, action+lane-keep passed the 200m speed-gated route. This is a governed hybrid success, not a pure action-policy success.
 
 ## Repository And Environment
 
@@ -42,12 +42,14 @@ Notes:
 | `d0_small_h3_fs5_fast_e5` | ViT small | 128 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e) | historical absolute progress | 1.1281 | 1.1324 | 0.5269 | 2.6708 | n/a |
 | `d0_tiny_h3_fs5_delta_predaux_e5` | ViT tiny | 192 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_e5-20260522-042925-552fb819) | delta progress + predicted aux | 0.2156 | 0.2147 | 0.0625 | 0.1606 | 0.1025 |
 | `d0_small_h3_fs5_delta_predaux_e5` | ViT small | 96 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_delta_predaux_e5-20260522-054348-da4e9fd5) | delta progress + predicted aux | 0.3311 | 0.3300 | 0.1243 | 0.1600 | 0.1225 |
+| `d0_tiny_h3_fs5_delta_predaux_action_10k` | ViT tiny | 192 | [run](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_action_10k-20260522-103256-1a514e1e) | delta + pred-aux + action-prior | 0.1425 | 0.1400 | 0.0240 | 0.0730 | 0.0186 |
 
 Batch/resource notes:
 
 - Tiny batch probe selected `batch_size=192`; `batch_size=256` OOMed.
 - The latest small delta/pred-aux batch probe OOMed at `128` and passed `96` with `18.139GB` peak allocated VRAM, while the live run used about `26GB` total GPU memory including overhead and other active processes.
 - The small delta/pred-aux best checkpoint came from epoch 1; later validation losses were worse: epoch 2 `0.3721`, epoch 3 `0.7614`, epoch 4 `0.3587`, epoch 5 `0.3413`.
+- The action-prior 10k run stopped by `max_steps`; best checkpoint was step `9843`, with test action loss `0.0201` and test pred-action loss `0.0116`.
 - `num_workers=2` was selected after the fast HDF5 export improved loader behavior.
 
 ## Closed-Loop Evidence
@@ -69,6 +71,10 @@ Batch/resource notes:
 | Lane-keep controller | 1 | 200m | isolated port 2100, speed gate 35km/h | 200.00m | 100.0 | pass |
 | Tiny delta/pred-aux checkpoint + lane-keep steer | 1 | 200m | isolated port 2100, speed gate 35km/h | 24.17m | 10.27 | failed speed-limit |
 | Tiny delta/pred-aux checkpoint + lane/speed governor | 1 | 200m | isolated port 2100, speed gate 35km/h | 200.00m | 100.0 | governed hybrid pass |
+| Action-prior raw `model_action` | 1 | 200m | isolated port 2100, no throttle/brake sanitization | 0.003m | 0.001 | failed blocked |
+| Action-prior `model_action` | 1 | 200m | isolated port 2100, throttle/brake exclusive | 24.84m | 10.56 | failed speed-limit |
+| Action-prior `model_action_lane_keep` | 1 | 200m | isolated port 2100, throttle/brake exclusive | 157.69m | 63.08 | failed blocked |
+| Action-prior `model_action_lane_keep` | 1 | 200m | isolated port 2100, exclusive + brake-release speed governor | 200.00m | 100.0 | governed hybrid pass |
 | Tiny checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 | Small checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 
@@ -78,6 +84,7 @@ Interpretation:
 - The valid model-policy results require an isolated CARLA server. The evaluator now records `sim_delta_s` and raises on external tick jumps.
 - The throttle-only target shows the model can sustain a simplified long-ish control loop up to 190m. The small ViT did not move the 200m boundary, and the steering-safe failures show that route-following still needs steering/lane-keeping calibration.
 - The speed-gated trace shows the fair metric matters: ungoverned model-lane-keep reaches only 24.17m before speed-limit violation, while governed hybrid reaches 200m with max speed `6.57m/s` and max lane offset `0.094m`.
+- The action-prior trace shows an action representation problem: the dataset has mutually exclusive throttle/brake, while the raw action head often predicts both. Evaluation-side exclusivity and speed-governor brake release can make the hybrid pass 200m, but pure action still fails speed compliance.
 
 ## Completed Code Work
 
@@ -86,15 +93,16 @@ Interpretation:
 - Added fast HDF5 export for random-access training.
 - Hardened training around batch probing, W&B run IDs/resume policy, local CSV fields, checkpoint selection, and CLI overrides.
 - Added CARLA closed-loop evaluator for autopilot, constant-action, checkpoint, lane-keep, and model-lane-keep policies, including short-eval CLI overrides, action traces, lane/heading trace columns, speed-limit infractions, and CARLA timing guards.
-- Added optional action-prior supervision on latent states plus `model_action` and `model_action_lane_keep` policies for the next speed-gated D0 evaluation.
+- Added optional action-prior supervision on latent states plus `model_action` and `model_action_lane_keep` policies.
+- Added throttle/brake exclusivity and speed-governor brake release options for action-policy closed-loop evaluation.
 - Added tests for QC, training reliability, fast export, metrics, closed-loop evaluator, and delta-progress/predicted-aux targets.
 
 ## Current Next Gate
 
-The active next gate is to fix the model-controlled steering/action pathway:
+The active next gate is to move the action constraints from evaluation-time rules into the model/training objective:
 
 1. Keep delta-progress and predicted-aux as the current default objective.
-2. Run `configs/train_tiny_action_prior_10k.yaml` with W&B and best-checkpoint selection.
-3. Evaluate `model_action` and `model_action_lane_keep` on the 200m speed-gated D0 route.
-4. If pure action still fails below 50m, collect recovery data before scaling ViT.
-5. Only attempt 500m after 200m passes without off-road or speed-limit infractions.
+2. Add a conflict-aware action loss or action parameterization that cannot output throttle and brake together.
+3. Add a speed-aware action term or filtered expert target so pure action is not rewarded for persistent overspeed.
+4. Re-run tiny before scaling ViT.
+5. Only attempt 500m after pure or minimally-governed action passes 200m without off-road, blocked, or speed-limit infractions.

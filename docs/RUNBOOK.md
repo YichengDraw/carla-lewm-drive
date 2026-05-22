@@ -127,7 +127,7 @@ python -m carla_lewm_drive.driving_lewm.train \
   --run-name d0_small_h3_fs5_delta_predaux_e5
 ```
 
-Tiny action-prior 10k-step run:
+Completed tiny action-prior 10k-step run:
 
 ```bash
 python -m carla_lewm_drive.driving_lewm.train \
@@ -138,6 +138,19 @@ python -m carla_lewm_drive.driving_lewm.train \
   --max-steps 10000 \
   --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_10k \
   --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
+```
+
+Conflict-aware follow-up run:
+
+```bash
+python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_tiny_action_conflict_10k.yaml \
+  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
+  --batch-size 192 \
+  --num-workers 2 \
+  --max-steps 10000 \
+  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_conflict_10k \
+  --run-name d0_tiny_h3_fs5_delta_predaux_action_conflict_10k
 ```
 
 Attach the automatic watcher and evaluation handoff:
@@ -200,16 +213,16 @@ python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --output-dir outputs/d0_eval_tiny_model_lane_keep_governed_200m_v1
 ```
 
-After the action-prior checkpoint exists, run the action-policy checks:
+After the action-prior checkpoint exists, run the action-policy checks. Keep pure action and governed hybrid output directories separate:
 
 ```bash
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d0_model_action_speedgate.yaml \
-  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m
+  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m_exclusive_v1
 
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d0_model_action_lane_keep_speedgate.yaml \
-  --output-dir outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m
+  --output-dir outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m_brake_release_v2
 ```
 
 Gate:
@@ -232,8 +245,12 @@ Observed valid result:
 - Lane-keep controller passed 200m with the 35km/h speed gate, max lane offset 0.097m, max speed 7.10m/s.
 - Tiny delta/pred-aux plus lane-keep steering failed the speed-gated 200m run at 24.17m by speed-limit violation.
 - Tiny delta/pred-aux plus lane/speed governor passed 200m with the 35km/h speed gate, max lane offset 0.094m, max speed 6.57m/s.
+- Action-prior raw policies without throttle/brake exclusivity were blocked at about 0.003m because throttle and brake were predicted together.
+- Action-prior pure `model_action` with throttle/brake exclusivity reached 24.84m, then failed by speed-limit violation.
+- Action-prior `model_action_lane_keep` with throttle/brake exclusivity reached 157.69m, then failed by blocked.
+- Action-prior `model_action_lane_keep` with exclusivity plus speed-governor brake release passed 200m with 100.0 mini score, max speed 6.38m/s, and max absolute lane offset 0.072m.
 - Earlier port-2000 model-policy outputs were invalidated because an external HIL client was ticking CARLA during model inference.
 
 ## Stop Rule
 
-Do not spend more time on larger ViTs until model-controlled speed and steering/lane keeping are fixed. Delta-progress and predicted-aux are now tested on tiny and small; the current useful work is action/control calibration before any 500m run.
+Do not spend more time on larger ViTs until model-controlled speed and steering/lane keeping are fixed. Delta-progress and predicted-aux are now tested on tiny and small; action-prior 10k is complete. The current useful work is conflict-aware/speed-aware action training before any 500m run.

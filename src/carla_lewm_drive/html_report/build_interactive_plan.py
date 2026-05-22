@@ -120,10 +120,10 @@ HTML = r"""<!doctype html>
           <div class="metric"><span>Best offline</span><strong>tiny delta</strong><span>test/loss 0.2147</span></div>
           <div class="metric"><span>Model-only</span><strong>190m</strong><span>tiny delta throttle-only 通过</span></div>
           <div class="metric"><span>Governed hybrid</span><strong>200m</strong><span>速度门控下通过</span></div>
-          <div class="metric"><span>Next</span><strong>10k action</strong><span>action prior 训练</span></div>
+          <div class="metric"><span>Action hybrid</span><strong>200m</strong><span>action-prior + governor 通过</span></div>
         </div>
         <div class="callout ok">
-          当前状态：数据和训练流水线可信；tiny/small delta-progress + predicted-aux 在隔离 CARLA 2100 端口和 throttle-only 简化目标下 190m 无 hard infraction。严格速度门控后，未加 governor 的 model-lane-keep 在 24.17m 因超速失败；带 lane/speed governor 的 hybrid 200m 通过。下一阶段已落地为 10k-step action-prior tiny run，用来验证模型自己能否学会控速和控向。
+          当前状态：数据和训练流水线可信；tiny/small delta-progress + predicted-aux 在隔离 CARLA 2100 端口和 throttle-only 简化目标下 190m 无 hard infraction。10k-step action-prior tiny run 已完成；未经 throttle/brake 互斥化的 action policy 会原地 blocked，互斥化后 pure action 到 24.84m 因超速失败，action+lane-keep 到 157.69m 因 blocked 失败；加入 speed governor 的 brake-release 后，action+lane-keep 在 200m speed-gated 指标下通过。这个 200m 是 governed hybrid 成果，不是 pure action 成果。
         </div>
       </section>
 
@@ -198,8 +198,12 @@ HTML = r"""<!doctype html>
             <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_delta_predaux_e5-20260522-054348-da4e9fd5"><code>d0_small_h3_fs5_delta_predaux_e5</code></a><br>当前 small，delta-progress + predicted-aux，已完成。</td>
             <td>ViT small</td><td>96</td><td>val 0.3311<br>test 0.3300<br>pred 0.1243<br>pred-aux 0.1225</td><td><div class="bar"><span style="width: 65%"></span></div>best 来自 epoch 1；离线不如 tiny，闭环也没有突破 200m。</td>
           </tr>
+          <tr>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_action_10k-20260522-103256-1a514e1e"><code>d0_tiny_h3_fs5_delta_predaux_action_10k</code></a><br>tiny，delta-progress + predicted-aux + action-prior，10,000 steps。</td>
+            <td>ViT tiny</td><td>192</td><td>best val 0.1425 @9843<br>test 0.1400<br>action 0.0201<br>pred-action 0.0116</td><td><div class="bar"><span style="width: 98%"></span></div>离线 action loss 明显可学；闭环瓶颈转为动作解码和速度/刹车策略。</td>
+          </tr>
         </table>
-        <div class="callout">当前结论：W&B 曲线和 test loss 只能证明离线拟合变好。tiny/small 都通过 190m，但 200m 与 steering-safe 仍需要闭环修复。</div>
+        <div class="callout">当前结论：W&B 曲线和 test loss 只能证明离线拟合变好。action-prior 让 action head 可用，但 pure action 仍超速；200m 成果来自 action head + lane/speed governor 的 hybrid 配置。</div>
       </section>
 
       <section id="eval" data-kind="eval">
@@ -219,6 +223,10 @@ HTML = r"""<!doctype html>
           <tr><td>lane-keep controller</td><td>200m cap, isolated port 2100, speed gate 35km/h</td><td>200.00m</td><td>100.0</td><td><span class="tag good">pass</span> route 和指标可通过。</td></tr>
           <tr><td>tiny delta + lane-keep steer</td><td>200m cap, speed gate 35km/h, no speed governor</td><td>24.17m</td><td>10.27</td><td><span class="tag bad">fail</span> 模型油门导致超速。</td></tr>
           <tr><td>tiny delta + lane/speed governor</td><td>200m cap, speed gate 35km/h</td><td>200.00m</td><td>100.0</td><td><span class="tag good">pass</span> governed hybrid sanity pass。</td></tr>
+          <tr><td>action-prior raw model_action</td><td>200m cap, speed gate 35km/h, no throttle/brake sanitization</td><td>0.003m</td><td>0.001</td><td><span class="tag bad">fail</span> 油门和刹车同时输出，原地 blocked。</td></tr>
+          <tr><td>action-prior model_action</td><td>200m cap, throttle/brake exclusive</td><td>24.84m</td><td>10.56</td><td><span class="tag bad">fail</span> 起步成功，但 pure action 控速失败。</td></tr>
+          <tr><td>action-prior + lane-keep</td><td>200m cap, throttle/brake exclusive</td><td>157.69m</td><td>63.08</td><td><span class="tag warn">partial</span> 无碰撞/离路/红灯/超速，尾段被模型刹停。</td></tr>
+          <tr><td>action-prior + lane/speed governor</td><td>200m cap, exclusive + brake release below overspeed</td><td>200.00m</td><td>100.0</td><td><span class="tag good">pass</span> governed hybrid 通过，max speed 6.38m/s，max lane offset 0.072m。</td></tr>
         </table>
         <div class="callout">有效性说明：早期 port 2000 model eval 被外部 HIL client tick 污染；当前 evaluator 已写 action/timing/lane/speed trace，并在 `sim_delta_s` 过大时 fail。严格 fair gate 应使用 speed-limit-aware 配置。</div>
       </section>
@@ -235,11 +243,11 @@ HTML = r"""<!doctype html>
         </details>
         <details open data-kind="eval"><summary>Phase 4：简化闭环 sanity <span class="tag good">hybrid 200m pass</span></summary>
           <p>目标：用 IFD 和 Mini Driving Score 检查模型能否短程不出错。</p>
-          <p>结果：隔离 CARLA + throttle-only 下 tiny/small delta-pred-aux 都 190m pass；200m 在约 191.7m off-road。speed-gated model-lane-keep 无 governor 时 24.17m 因超速失败；带 lane/speed governor 后 200m pass。下一步需要让模型自己学会控速和控向。</p>
+          <p>结果：隔离 CARLA + throttle-only 下 tiny/small delta-pred-aux 都 190m pass；200m 在约 191.7m off-road。speed-gated model-lane-keep 无 governor 时 24.17m 因超速失败；带 lane/speed governor 后 200m pass。action-prior 复测确认 200m 可以由 action head + governor 完成，但 pure action 仍没有通过速度规则。</p>
         </details>
-        <details open data-kind="train"><summary>Phase 4.5：Action-prior 10k <span class="tag">ready</span></summary>
+        <details open data-kind="train"><summary>Phase 4.5：Action-prior 10k <span class="tag good">done</span></summary>
           <p>目标：在 tiny LeWM latent 上增加 action head，训练 10,000 optimizer steps，观察 action_loss、pred_action_loss 与 speed-gated closed-loop 是否同步改善。</p>
-          <p>门槛：W&B 从启动即在线；训练保存 best checkpoint；先跑 pure <code>model_action</code>，再跑 <code>model_action_lane_keep</code>。</p>
+          <p>结果：best val 0.1425，test action loss 0.0201；原始 action policy 因 throttle/brake 冲突原地 blocked。加入互斥控制后 pure action 起步但超速，action+lane-keep 157.69m 后 blocked；加入 speed governor brake-release 后 200m pass。下一步是把互斥/速度约束移回训练目标，而不是继续只靠评估侧规则。</p>
         </details>
         <details data-kind="risk"><summary>Phase 5：长程 500m / D1 低密交通 <span class="tag">not ready</span></summary>
           <p>进入条件：200m speed-gated model policy pass，并且 steering-enabled 目标至少 150m IFD 且无 hard infraction。</p>
@@ -277,16 +285,27 @@ python -m carla_lewm_drive.driving_lewm.train \
   --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_10k \
   --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
 
+python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_tiny_action_conflict_10k.yaml \
+  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
+  --batch-size 192 --num-workers 2 --max-steps 10000 \
+  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_conflict_10k \
+  --run-name d0_tiny_h3_fs5_delta_predaux_action_conflict_10k
+
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d0_model_action_speedgate.yaml \
-  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m</code></pre>
+  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m_exclusive_v1
+
+python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d0_model_action_lane_keep_speedgate.yaml \
+  --output-dir outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m_brake_release_v2</code></pre>
       </section>
 
       <section id="gates" data-kind="risk">
         <h2>Go / No-Go</h2>
         <div class="grid">
-          <div class="callout ok"><strong>Continue</strong><br>执行 10k-step action-prior tiny run，然后复跑 pure action 与 lane-keep action 的 200m speed-gated eval。</div>
-          <div class="callout"><strong>Pause</strong><br>离线 loss 继续下降但 IFD 不提升时，优先诊断控制闭环，不扩大模型。</div>
+          <div class="callout ok"><strong>Continue</strong><br>把 throttle/brake 互斥和速度合规约束移入训练目标，优先训练 action-conflict/speed-aware tiny 版本。</div>
+          <div class="callout"><strong>Pause</strong><br>如果 pure action 继续只靠评估侧 governor 才能通过，先诊断动作表示和专家分布，不扩大模型。</div>
           <div class="callout bad"><strong>Stop</strong><br>W&B 未启动、QC 非严格通过、autopilot baseline 失败、或 `sim_delta_s` 出现外部 tick 跳变。</div>
           <div class="callout"><strong>Scale</strong><br>只有 steering-enabled 目标呈 capacity-limited 时，才继续跑更大 ViT。</div>
         </div>

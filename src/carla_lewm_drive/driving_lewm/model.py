@@ -31,6 +31,8 @@ class DrivingLeWMConfig:
     pred_aux_weight: float = 1.0
     action_weight: float = 0.0
     pred_action_weight: float = 1.0
+    action_conflict_weight: float = 0.0
+    pred_action_conflict_weight: float = 1.0
     progress_mode: str = "absolute"
 
 
@@ -168,6 +170,13 @@ class DrivingLeWM(nn.Module):
         return mean_loss + std_loss
 
     @staticmethod
+    def action_conflict_loss(action: torch.Tensor) -> torch.Tensor:
+        block = action.float().reshape(*action.shape[:-1], -1, 3)
+        throttle = F.relu(block[..., 0])
+        brake = F.relu(block[..., 2])
+        return (throttle * brake).mean()
+
+    @staticmethod
     def progress_signal(route_progress_m: torch.Tensor, mode: str) -> torch.Tensor:
         mode = str(mode).lower()
         if mode == "absolute":
@@ -212,12 +221,18 @@ class DrivingLeWM(nn.Module):
         action_loss = F.smooth_l1_loss(out["action"], action_target)
         pred_action_loss = F.smooth_l1_loss(out["pred_action"], pred_action_target)
         action_total = action_loss + self.cfg.pred_action_weight * pred_action_loss
+        action_conflict = self.action_conflict_loss(out["action"])
+        pred_action_conflict = self.action_conflict_loss(out["pred_action"])
+        action_conflict_total = (
+            action_conflict + self.cfg.pred_action_conflict_weight * pred_action_conflict
+        )
 
         total = (
             pred_loss
             + self.cfg.sigreg_weight * sigreg
             + self.cfg.aux_weight * aux_total
             + self.cfg.action_weight * action_total
+            + self.cfg.action_conflict_weight * action_conflict_total
         )
         return {
             "loss": total,
@@ -227,6 +242,8 @@ class DrivingLeWM(nn.Module):
             "pred_aux_loss": pred_aux_loss.detach(),
             "action_loss": action_loss.detach(),
             "pred_action_loss": pred_action_loss.detach(),
+            "action_conflict_loss": action_conflict.detach(),
+            "pred_action_conflict_loss": pred_action_conflict.detach(),
         }
 
     @torch.no_grad()

@@ -302,6 +302,8 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
         pred_aux_weight=float(model_cfg.get("pred_aux_weight", 1.0)),
         action_weight=float(model_cfg.get("action_weight", 0.0)),
         pred_action_weight=float(model_cfg.get("pred_action_weight", 1.0)),
+        action_conflict_weight=float(model_cfg.get("action_conflict_weight", 0.0)),
+        pred_action_conflict_weight=float(model_cfg.get("pred_action_conflict_weight", 1.0)),
         progress_mode=str(model_cfg.get("progress_mode", "absolute")),
     )
     model = DrivingLeWM(lewm_cfg)

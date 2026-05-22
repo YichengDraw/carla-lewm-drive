@@ -14,7 +14,7 @@ The project is intentionally narrow: start with an easy single-ego CARLA setting
 - Compact Driving-LeWM with ViT `tiny` and `small` configs, latent prediction, SIGReg-style regularization, and auxiliary driving heads.
 - W&B logging for serious runs plus local `metrics.csv`, `split_manifest.json`, `best.pt`, and `test_metrics.json`.
 - Closed-loop evaluator for CARLA autopilot baselines, checkpoint-driven model control, lane-keep/hybrid sanity checks, and speed-limit-aware `Infraction-Free Distance` / `Mini Driving Score`.
-- Action-prior extension: an optional latent action head and `max_steps` training cap for the next 10k-step control experiment.
+- Action-prior extension: a latent action head, 10k-step W&B run, action trace diagnostics, and throttle/brake sanitization for CARLA control.
 - Interactive Chinese project dashboard at `interactive_plan.html`.
 
 ## Current Evidence
@@ -36,8 +36,12 @@ Status after the first D0 execution pass:
 - Speed-gated lane-keep controller sanity baseline: 200m pass, 100.0 mini score, max lane offset `0.097m`, max speed `7.10m/s`.
 - Speed-gated tiny model + lane-keep steering without speed governor: failed at `24.17m` from speed-limit violation, proving the fair metric must include speed rules.
 - Speed-gated tiny model + lane/speed governor: 200m pass, 100.0 mini score, max lane offset `0.094m`, max speed `6.57m/s`.
+- Action-prior 10k tiny run: [`d0_tiny_h3_fs5_delta_predaux_action_10k`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_action_10k-20260522-103256-1a514e1e), best val loss `0.1425` at step `9843`, test loss `0.1400`, test action loss `0.0201`, test pred-action loss `0.0116`.
+- Raw action-policy evaluation exposed a control-interface failure: without throttle/brake exclusivity, both `model_action` and `model_action_lane_keep` were blocked at about `0.003m` because the action head often predicted throttle and brake together.
+- With throttle/brake exclusivity, pure `model_action` reached `24.84m` before speed-limit violation; `model_action_lane_keep` reached `157.69m` before blocked.
+- With throttle/brake exclusivity plus speed-governor brake release, `model_action_lane_keep` reached `200.00m`, 100.0 mini score, success rate `1.0`, max speed `6.38m/s`, max absolute lane offset `0.072m`.
 
-Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified model-driven D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not solve steering or speed compliance. The current fair 200m pass is a governed hybrid sanity result, not a fully autonomous model-control result. The next execution gate is documented in `docs/NEXT_ACTION_PLAN.md`.
+Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified model-driven D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not solve steering or speed compliance. The action-prior head learned useful controls only after the evaluator enforced the same throttle/brake exclusivity that exists in the dataset. The current 200m pass is a governed hybrid result, not a pure action-policy success; pure model action still fails on speed control.
 
 ## Installation
 
@@ -108,7 +112,7 @@ carla-lewm-train --config configs/train_tiny.yaml \
 
 Use `configs/train_small.yaml` only after tiny has failed a controlled gate. In this D0 run, small delta-progress + predicted-aux did not improve the throttle-only 200m boundary or the steering-safe 150m gate, so the next useful work is control/objective calibration rather than a larger ViT.
 
-Next control-focused tiny run:
+Completed control-focused tiny run:
 
 ```bash
 carla-lewm-train --config configs/train_tiny_action_prior_10k.yaml \
@@ -118,6 +122,18 @@ carla-lewm-train --config configs/train_tiny_action_prior_10k.yaml \
   --max-steps 10000 \
   --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_10k \
   --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
+```
+
+Next conflict-aware action run:
+
+```bash
+carla-lewm-train --config configs/train_tiny_action_conflict_10k.yaml \
+  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
+  --batch-size 192 \
+  --num-workers 2 \
+  --max-steps 10000 \
+  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_conflict_10k \
+  --run-name d0_tiny_h3_fs5_delta_predaux_action_conflict_10k
 ```
 
 ## Evaluation
@@ -158,9 +174,9 @@ After the action-prior checkpoint exists:
 
 ```bash
 carla-lewm-eval --config configs/eval_d0_model_action_speedgate.yaml \
-  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m
+  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m_exclusive_v1
 carla-lewm-eval --config configs/eval_d0_model_action_lane_keep_speedgate.yaml \
-  --output-dir outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m
+  --output-dir outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m_brake_release_v2
 ```
 
 ## Interactive Plan

@@ -44,3 +44,19 @@ def test_progress_signal_rejects_unknown_mode():
 
     with pytest.raises(ValueError, match="Unknown progress_mode"):
         DrivingLeWM.progress_signal(route_progress, "bad-mode")
+
+
+def test_action_conflict_loss_penalizes_positive_throttle_and_brake_overlap():
+    actions = torch.tensor(
+        [
+            [
+                [0.5, 0.0, 0.0, 0.2, 0.0, 0.3],
+                [0.0, 0.0, 0.4, -0.5, 0.0, 0.8],
+            ]
+        ],
+        dtype=torch.float32,
+    )
+
+    loss = DrivingLeWM.action_conflict_loss(actions)
+
+    assert float(loss) == pytest.approx((0.0 + 0.06 + 0.0 + 0.0) / 4)
