@@ -38,6 +38,7 @@ eval:
   exclusive_throttle_brake: true
   lane_keep:
     govern_model_speed: true
+    clear_model_brake_when_not_overspeed: true
     throttle: 0.40
     speed_kp: 0.05
     throttle_min: 0.00

@@ -592,7 +592,10 @@ def maybe_govern_model_speed(action: np.ndarray, lane_offset_m: float, heading_e
     governed = lane_keep_action(lane_offset_m, heading_error_rad, speed_mps, eval_cfg)
     out = np.asarray(action, dtype=np.float32).copy()
     out[0] = min(float(out[0]), float(governed[0]))
-    out[2] = max(float(out[2]), float(governed[2]))
+    if bool(lane_cfg.get("clear_model_brake_when_not_overspeed", False)) and float(governed[2]) <= 1e-6:
+        out[2] = 0.0
+    else:
+        out[2] = max(float(out[2]), float(governed[2]))
     return out
 
 
