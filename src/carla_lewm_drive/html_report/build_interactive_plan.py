@@ -120,10 +120,10 @@ HTML = r"""<!doctype html>
           <div class="metric"><span>Best offline</span><strong>tiny delta</strong><span>test/loss 0.2147</span></div>
           <div class="metric"><span>Model-only</span><strong>190m</strong><span>tiny delta throttle-only 通过</span></div>
           <div class="metric"><span>Governed hybrid</span><strong>200m</strong><span>速度门控下通过</span></div>
-          <div class="metric"><span>Next</span><strong>actions</strong><span>模型控速和控向待修</span></div>
+          <div class="metric"><span>Next</span><strong>10k action</strong><span>action prior 训练</span></div>
         </div>
         <div class="callout ok">
-          当前状态：数据和训练流水线可信；tiny/small delta-progress + predicted-aux 在隔离 CARLA 2100 端口和 throttle-only 简化目标下 190m 无 hard infraction。严格速度门控后，未加 governor 的 model-lane-keep 在 24.17m 因超速失败；带 lane/speed governor 的 hybrid 200m 通过。这个 200m 是 governed sanity pass，不是模型完全自主控车。
+          当前状态：数据和训练流水线可信；tiny/small delta-progress + predicted-aux 在隔离 CARLA 2100 端口和 throttle-only 简化目标下 190m 无 hard infraction。严格速度门控后，未加 governor 的 model-lane-keep 在 24.17m 因超速失败；带 lane/speed governor 的 hybrid 200m 通过。下一阶段已落地为 10k-step action-prior tiny run，用来验证模型自己能否学会控速和控向。
         </div>
       </section>
 
@@ -144,6 +144,8 @@ HTML = r"""<!doctype html>
           <tr><td><code>delta-progress</code></td><td>把 route progress 从绝对里程改成相邻样本的前进增量，避免模型把“已经走了多远”当作静态标签背下来。</td></tr>
           <tr><td><code>pred_aux</code></td><td>从预测 latent 上直接回归速度、油门、转向、制动、路线增量等辅助状态，迫使预测状态对控制规划有用。</td></tr>
           <tr><td><code>pred_aux_loss</code></td><td>预测 latent 的辅助回归损失，越低表示模型预测的下一步 latent 更包含驾驶相关信息。</td></tr>
+          <tr><td><code>action prior</code></td><td>从 latent 直接预测 5 帧动作块，用 behavior cloning 约束模型动作分布；不是替代 LeWM 主干。</td></tr>
+          <tr><td><code>max_steps</code></td><td>按 optimizer update 设训练预算，当前 action-prior 主实验为 10,000 steps。</td></tr>
           <tr><td><code>steering-safe</code></td><td>极窄转向范围的闭环配置，目标是恢复安全转向；当前 tiny/small delta-pred-aux 都失败。</td></tr>
           <tr><td><code>sim_delta_s</code></td><td>相邻控制 tick 的 CARLA 仿真时间差；过大说明有外部客户端推进世界，评估应判无效。</td></tr>
           <tr><td><code>D0</code></td><td>单车、白天、固定简化路线、强约束质量门控，是第一阶段最简单数据分布。</td></tr>
@@ -235,6 +237,10 @@ HTML = r"""<!doctype html>
           <p>目标：用 IFD 和 Mini Driving Score 检查模型能否短程不出错。</p>
           <p>结果：隔离 CARLA + throttle-only 下 tiny/small delta-pred-aux 都 190m pass；200m 在约 191.7m off-road。speed-gated model-lane-keep 无 governor 时 24.17m 因超速失败；带 lane/speed governor 后 200m pass。下一步需要让模型自己学会控速和控向。</p>
         </details>
+        <details open data-kind="train"><summary>Phase 4.5：Action-prior 10k <span class="tag">ready</span></summary>
+          <p>目标：在 tiny LeWM latent 上增加 action head，训练 10,000 optimizer steps，观察 action_loss、pred_action_loss 与 speed-gated closed-loop 是否同步改善。</p>
+          <p>门槛：W&B 从启动即在线；训练保存 best checkpoint；先跑 pure <code>model_action</code>，再跑 <code>model_action_lane_keep</code>。</p>
+        </details>
         <details data-kind="risk"><summary>Phase 5：长程 500m / D1 低密交通 <span class="tag">not ready</span></summary>
           <p>进入条件：200m speed-gated model policy pass，并且 steering-enabled 目标至少 150m IFD 且无 hard infraction。</p>
         </details>
@@ -262,13 +268,24 @@ python -m carla_lewm_drive.closed_loop_eval.evaluate \
 
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d0_model_lane_keep_governed.yaml \
-  --output-dir outputs/d0_eval_tiny_model_lane_keep_governed_200m_v1</code></pre>
+  --output-dir outputs/d0_eval_tiny_model_lane_keep_governed_200m_v1
+
+python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_tiny_action_prior_10k.yaml \
+  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
+  --batch-size 192 --num-workers 2 --max-steps 10000 \
+  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_10k \
+  --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
+
+python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d0_model_action_speedgate.yaml \
+  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m</code></pre>
       </section>
 
       <section id="gates" data-kind="risk">
         <h2>Go / No-Go</h2>
         <div class="grid">
-          <div class="callout ok"><strong>Continue</strong><br>修模型控速和 steering-safe/lane keeping，然后复跑 150m steering-safe 与 200m speed-gated model policy。</div>
+          <div class="callout ok"><strong>Continue</strong><br>执行 10k-step action-prior tiny run，然后复跑 pure action 与 lane-keep action 的 200m speed-gated eval。</div>
           <div class="callout"><strong>Pause</strong><br>离线 loss 继续下降但 IFD 不提升时，优先诊断控制闭环，不扩大模型。</div>
           <div class="callout bad"><strong>Stop</strong><br>W&B 未启动、QC 非严格通过、autopilot baseline 失败、或 `sim_delta_s` 出现外部 tick 跳变。</div>
           <div class="callout"><strong>Scale</strong><br>只有 steering-enabled 目标呈 capacity-limited 时，才继续跑更大 ViT。</div>

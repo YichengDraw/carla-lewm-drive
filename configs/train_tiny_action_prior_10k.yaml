@@ -1,0 +1,56 @@
+run:
+  name: d0_tiny_h3_fs5_delta_predaux_action_10k
+  seed: 3072
+  output_dir: outputs/d0_tiny_h3_fs5_delta_predaux_action_10k
+
+data:
+  dataset_path: data/d0_train/carla_d0_train_fast.h5
+  frameskip: 5
+  history_size: 3
+  num_preds: 1
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  split_seed: 9001
+  image_size: 224
+
+model:
+  encoder_scale: tiny
+  patch_size: 14
+  embed_dim: 192
+  predictor_depth: 6
+  predictor_heads: 6
+  predictor_mlp_dim: 768
+  dropout: 0.1
+  sigreg_weight: 0.09
+  aux_weight: 0.2
+  pred_aux_weight: 1.0
+  action_weight: 0.5
+  pred_action_weight: 1.0
+  progress_mode: delta
+
+optimizer:
+  lr: 5.0e-5
+  weight_decay: 1.0e-3
+
+trainer:
+  max_epochs: 60
+  max_steps: 10000
+  batch_size: 192
+  num_workers: 2
+  precision: bf16
+  gradient_clip_norm: 1.0
+  log_every_steps: 50
+  eval_every_epochs: 1
+  early_stop_patience_evals: 20
+  early_stop_min_steps: 3000
+  early_stop_min_delta: 0.0
+  batch_probe_order: [256, 192, 128, 96, 64]
+
+wandb:
+  enabled: true
+  entity: yicheng132024-southern-university-of-science-technology
+  project: carla-lewm-drive
+  group: d0-action-prior
+  resume: never
+  mode: online

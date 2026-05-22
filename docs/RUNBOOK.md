@@ -127,12 +127,26 @@ python -m carla_lewm_drive.driving_lewm.train \
   --run-name d0_small_h3_fs5_delta_predaux_e5
 ```
 
+Tiny action-prior 10k-step run:
+
+```bash
+python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_tiny_action_prior_10k.yaml \
+  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
+  --batch-size 192 \
+  --num-workers 2 \
+  --max-steps 10000 \
+  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_10k \
+  --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
+```
+
 Gate:
 
 - W&B URL appears at launch.
 - `metrics.csv`, `split_manifest.json`, `best.pt`, and `test_metrics.json` exist.
 - Validation/test loss is finite.
 - The stop reason is explicit.
+- For action-prior runs, `action_loss` and `pred_action_loss` must be logged.
 
 ## Phase 5: Closed-Loop Evaluation
 
@@ -174,6 +188,18 @@ python -m carla_lewm_drive.closed_loop_eval.evaluate \
 python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d0_model_lane_keep_governed.yaml \
   --output-dir outputs/d0_eval_tiny_model_lane_keep_governed_200m_v1
+```
+
+After the action-prior checkpoint exists, run the action-policy checks:
+
+```bash
+python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d0_model_action_speedgate.yaml \
+  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m
+
+python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d0_model_action_lane_keep_speedgate.yaml \
+  --output-dir outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m
 ```
 
 Gate:

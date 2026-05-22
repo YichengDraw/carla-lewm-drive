@@ -10,6 +10,8 @@ The current valid model-only success claim is intentionally narrow: on an isolat
 
 The new 200m pass is a governed hybrid sanity result: tiny LeWM stays in the loop for throttle/brake planning, while lane keeping and speed limiting are guarded by deterministic feedback. Without the speed governor, the same hybrid fails the fair speed-gated metric at 24.17m from speeding.
 
+The active implementation branch now adds a latent action-prior head, step-based training, and action-policy evaluation configs. The planned run is `d0_tiny_h3_fs5_delta_predaux_action_10k`, capped at 10,000 optimizer steps.
+
 ## Repository And Environment
 
 - GitHub repository: `https://github.com/YichengDraw/carla-lewm-drive`
@@ -84,6 +86,7 @@ Interpretation:
 - Added fast HDF5 export for random-access training.
 - Hardened training around batch probing, W&B run IDs/resume policy, local CSV fields, checkpoint selection, and CLI overrides.
 - Added CARLA closed-loop evaluator for autopilot, constant-action, checkpoint, lane-keep, and model-lane-keep policies, including short-eval CLI overrides, action traces, lane/heading trace columns, speed-limit infractions, and CARLA timing guards.
+- Added optional action-prior supervision on latent states plus `model_action` and `model_action_lane_keep` policies for the next speed-gated D0 evaluation.
 - Added tests for QC, training reliability, fast export, metrics, closed-loop evaluator, and delta-progress/predicted-aux targets.
 
 ## Current Next Gate
@@ -91,7 +94,7 @@ Interpretation:
 The active next gate is to fix the model-controlled steering/action pathway:
 
 1. Keep delta-progress and predicted-aux as the current default objective.
-2. Add speed-aware action supervision or a stronger action head before treating model throttle as fair.
-3. Add a stronger steering-safe action prior or behavior-cloning action head before re-enabling model steering.
-4. Re-run 150m steering-safe and 200m speed-gated model-lane-keep on isolated CARLA.
+2. Run `configs/train_tiny_action_prior_10k.yaml` with W&B and best-checkpoint selection.
+3. Evaluate `model_action` and `model_action_lane_keep` on the 200m speed-gated D0 route.
+4. If pure action still fails below 50m, collect recovery data before scaling ViT.
 5. Only attempt 500m after 200m passes without off-road or speed-limit infractions.

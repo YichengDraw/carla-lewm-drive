@@ -29,6 +29,8 @@ class DrivingLeWMConfig:
     sigreg_weight: float = 0.09
     aux_weight: float = 0.2
     pred_aux_weight: float = 1.0
+    action_weight: float = 0.0
+    pred_action_weight: float = 1.0
     progress_mode: str = "absolute"
 
 
@@ -107,6 +109,12 @@ class DrivingLeWM(nn.Module):
             nn.GELU(),
             nn.Linear(cfg.embed_dim, 8),
         )
+        self.action_head = nn.Sequential(
+            nn.LayerNorm(cfg.embed_dim),
+            nn.Linear(cfg.embed_dim, cfg.embed_dim),
+            nn.GELU(),
+            nn.Linear(cfg.embed_dim, cfg.action_dim),
+        )
 
     @staticmethod
     def _make_vit(cfg: DrivingLeWMConfig) -> nn.Module:
@@ -140,7 +148,17 @@ class DrivingLeWM(nn.Module):
         pred = pred[:, : target.shape[1]]
         aux = self.aux_head(emb)
         pred_aux = self.aux_head(pred)
-        return {"emb": emb, "pred_emb": pred, "target_emb": target, "aux": aux, "pred_aux": pred_aux}
+        action = self.action_head(emb)
+        pred_action = self.action_head(pred)
+        return {
+            "emb": emb,
+            "pred_emb": pred,
+            "target_emb": target,
+            "aux": aux,
+            "pred_aux": pred_aux,
+            "action": action,
+            "pred_action": pred_action,
+        }
 
     @staticmethod
     def sigreg_loss(emb: torch.Tensor) -> torch.Tensor:
@@ -188,13 +206,27 @@ class DrivingLeWM(nn.Module):
         aux_loss = F.smooth_l1_loss(out["aux"], aux_target)
         pred_aux_loss = F.smooth_l1_loss(out["pred_aux"], pred_aux_target)
         aux_total = aux_loss + self.cfg.pred_aux_weight * pred_aux_loss
-        total = pred_loss + self.cfg.sigreg_weight * sigreg + self.cfg.aux_weight * aux_total
+
+        action_target = batch["action"].float()
+        pred_action_target = action_target[:, 1 : self.cfg.history_size + 1].detach()
+        action_loss = F.smooth_l1_loss(out["action"], action_target)
+        pred_action_loss = F.smooth_l1_loss(out["pred_action"], pred_action_target)
+        action_total = action_loss + self.cfg.pred_action_weight * pred_action_loss
+
+        total = (
+            pred_loss
+            + self.cfg.sigreg_weight * sigreg
+            + self.cfg.aux_weight * aux_total
+            + self.cfg.action_weight * action_total
+        )
         return {
             "loss": total,
             "pred_loss": pred_loss.detach(),
             "sigreg_loss": sigreg.detach(),
             "aux_loss": aux_loss.detach(),
             "pred_aux_loss": pred_aux_loss.detach(),
+            "action_loss": action_loss.detach(),
+            "pred_action_loss": pred_action_loss.detach(),
         }
 
     @torch.no_grad()
@@ -206,3 +238,9 @@ class DrivingLeWM(nn.Module):
         ctx_act = act_emb[:, -self.cfg.history_size :]
         pred = self.predictor(ctx, ctx_act)[:, -1:]
         return self.aux_head(pred).squeeze(1)
+
+    @torch.no_grad()
+    def policy_action(self, pixels: torch.Tensor) -> torch.Tensor:
+        self.eval()
+        emb = self.encode_pixels(pixels)
+        return self.action_head(emb[:, -1])

@@ -26,7 +26,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument(
         "--policy",
-        choices=["checkpoint", "model", "model_lane_keep", "expert", "autopilot", "constant", "lane_keep"],
+        choices=[
+            "checkpoint",
+            "model",
+            "model_lane_keep",
+            "model_action",
+            "model_action_lane_keep",
+            "expert",
+            "autopilot",
+            "constant",
+            "lane_keep",
+        ],
         default=None,
     )
     parser.add_argument("--baseline", choices=["expert", "autopilot", "lane_keep"], default=None)
@@ -58,6 +68,10 @@ def normalize_policy(policy: str | None) -> str:
         return "model"
     if value == "model_lane_keep":
         return "model_lane_keep"
+    if value in {"model_action", "action"}:
+        return "model_action"
+    if value in {"model_action_lane_keep", "action_lane_keep"}:
+        return "model_action_lane_keep"
     if value in {"expert", "autopilot"}:
         return "autopilot"
     if value == "constant":
@@ -69,6 +83,14 @@ def normalize_policy(policy: str | None) -> str:
 
 def is_model_policy(policy: str) -> bool:
     return policy in {"model", "model_lane_keep"}
+
+
+def requires_model(policy: str) -> bool:
+    return policy in {"model", "model_lane_keep", "model_action", "model_action_lane_keep"}
+
+
+def is_action_policy(policy: str) -> bool:
+    return policy in {"model_action", "model_action_lane_keep"}
 
 
 def resolve_policy(cfg: dict[str, Any], args: argparse.Namespace | None = None) -> str:
@@ -278,10 +300,22 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
         sigreg_weight=float(model_cfg["sigreg_weight"]),
         aux_weight=float(model_cfg["aux_weight"]),
         pred_aux_weight=float(model_cfg.get("pred_aux_weight", 1.0)),
+        action_weight=float(model_cfg.get("action_weight", 0.0)),
+        pred_action_weight=float(model_cfg.get("pred_action_weight", 1.0)),
         progress_mode=str(model_cfg.get("progress_mode", "absolute")),
     )
     model = DrivingLeWM(lewm_cfg)
-    model.load_state_dict(payload["model"], strict=True)
+    try:
+        model.load_state_dict(payload["model"], strict=True)
+        model._checkpoint_missing_action_head = False
+    except RuntimeError:
+        result = model.load_state_dict(payload["model"], strict=False)
+        missing = list(result.missing_keys)
+        unexpected = list(result.unexpected_keys)
+        allowed_missing = all(key.startswith("action_head.") for key in missing)
+        if unexpected or not allowed_missing:
+            raise
+        model._checkpoint_missing_action_head = bool(missing)
     model.eval()
     return model
 
@@ -295,7 +329,7 @@ def run_dry_eval(cfg: dict[str, Any], checkpoint_path: Path | None, policy: str)
         "route_cap_m": float(eval_cfg["route_cap_m"]),
         "output_dir": str(eval_cfg["output_dir"]),
     }
-    if is_model_policy(policy):
+    if requires_model(policy):
         if checkpoint_path is None:
             raise ValueError("A checkpoint is required for checkpoint/model dry-run validation")
         model = load_model(checkpoint_path)
@@ -308,6 +342,7 @@ def run_dry_eval(cfg: dict[str, Any], checkpoint_path: Path | None, policy: str)
                 "model_action_dim": int(model.cfg.action_dim),
                 "model_frameskip": action_dim_to_frameskip(int(model.cfg.action_dim)),
                 "history_size": int(model.cfg.history_size),
+                "action_head_available": not bool(getattr(model, "_checkpoint_missing_action_head", False)),
             }
         )
     return out
@@ -530,6 +565,14 @@ def lane_keep_action(lane_offset_m: float, heading_error_rad: float, speed_mps: 
     return np.asarray([throttle, lane_keep_steer(lane_offset_m, heading_error_rad, eval_cfg), brake], dtype=np.float32)
 
 
+def flatten_model_action_to_block(action_flat: np.ndarray, action_dim: int) -> np.ndarray:
+    action_flat = np.asarray(action_flat, dtype=np.float32).reshape(-1)
+    if action_flat.shape[0] != int(action_dim):
+        raise ValueError(f"Expected flat action_dim={action_dim}, got {action_flat.shape[0]}")
+    block = action_flat.reshape(action_dim_to_frameskip(action_dim), 3).astype(np.float32)
+    return np.clip(block, DrivingActionBounds().low, DrivingActionBounds().high).astype(np.float32)
+
+
 def maybe_govern_model_speed(action: np.ndarray, lane_offset_m: float, heading_error_rad: float, speed_mps: float, eval_cfg: dict[str, Any]) -> np.ndarray:
     lane_cfg = eval_cfg.get("lane_keep", {})
     if not bool(lane_cfg.get("govern_model_speed", False)):
@@ -644,9 +687,11 @@ def run_episode(
 
         image_history: list[np.ndarray] = []
         action_history: list[np.ndarray] = []
-        if is_model_policy(policy):
-            if model is None or planner is None:
-                raise ValueError("Model policy requires both model and planner")
+        if requires_model(policy):
+            if model is None:
+                raise ValueError("Model-backed policy requires a model checkpoint")
+            if is_model_policy(policy) and planner is None:
+                raise ValueError("Model planning policy requires a planner")
             idle_action = np.asarray(eval_cfg.get("model_warmup_action", [0.0, 0.0, 1.0]), dtype=np.float32)
             frameskip = action_dim_to_frameskip(int(model.cfg.action_dim))
             for _ in range(int(model.cfg.history_size)):
@@ -681,6 +726,21 @@ def run_episode(
                     ).copy()
                     action[1] = lane_keep_steer(pre_lane_offset, pre_heading_error, eval_cfg)
                 block_actions = [action for _ in range(frameskip)]
+            elif is_action_policy(policy):
+                assert model is not None
+                if bool(getattr(model, "_checkpoint_missing_action_head", False)):
+                    raise ValueError("Action policy requires a checkpoint trained with action_head weights")
+                pixels = preprocess_pixels(image_history[-int(model.cfg.history_size) :], int(model.cfg.image_size), device)
+                action_flat = model.policy_action(pixels).detach().cpu().numpy()[0]
+                block = flatten_model_action_to_block(action_flat, int(model.cfg.action_dim))
+                if policy == "model_action_lane_keep":
+                    steer = lane_keep_steer(pre_lane_offset, pre_heading_error, eval_cfg)
+                    for raw in block:
+                        raw[1] = steer
+                        governed = maybe_govern_model_speed(raw, pre_lane_offset, pre_heading_error, current_speed, eval_cfg)
+                        raw[0] = governed[0]
+                        raw[2] = governed[2]
+                block_actions = [raw.astype(np.float32) for raw in block]
             elif policy == "lane_keep":
                 action = lane_keep_action(pre_lane_offset, pre_heading_error, current_speed, eval_cfg)
                 block_actions = [action]
@@ -782,7 +842,7 @@ def run_episode(
                 if step >= max_steps or acc.route_progress_m >= route_length_m:
                     break
 
-            if is_model_policy(policy) and latest_rgb is not None and block_raw_actions:
+            if requires_model(policy) and latest_rgb is not None and block_raw_actions:
                 image_history.append(latest_rgb)
                 block = np.asarray(block_raw_actions, dtype=np.float32)
                 if block.shape[0] < frameskip:
@@ -819,10 +879,13 @@ def run_closed_loop_eval(cfg: dict[str, Any], checkpoint_path: Path | None, poli
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model: DrivingLeWM | None = None
     planner: CEMPlanner | None = None
-    if is_model_policy(policy):
+    if requires_model(policy):
         if checkpoint_path is None:
             raise ValueError("A checkpoint is required for checkpoint/model evaluation")
         model = load_model(checkpoint_path).to(device)
+        if is_action_policy(policy) and bool(getattr(model, "_checkpoint_missing_action_head", False)):
+            raise ValueError("Action policy requires a checkpoint trained with action_head weights")
+    if is_model_policy(policy):
         planner_cfg = dict(cfg["planner"])
         planner_cfg["target_speed_mps"] = float(eval_cfg["target_speed_kmh"]) / 3.6
         planner = CEMPlanner(planner_cfg)

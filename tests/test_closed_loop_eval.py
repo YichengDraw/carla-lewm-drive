@@ -9,6 +9,7 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     CEMPlanner,
     apply_cli_overrides,
     expand_action_to_model_dim,
+    flatten_model_action_to_block,
     lane_keep_action,
     lane_keep_steer,
     maybe_govern_model_speed,
@@ -59,6 +60,36 @@ def test_expand_action_to_model_dim_repeats_raw_control_for_frameskip():
 
     assert out.shape == (15,)
     assert np.allclose(out.reshape(5, 3), np.array([[0.1, -0.2, 0.3]] * 5, dtype=np.float32))
+
+
+def test_flatten_model_action_to_block_recovers_frameskip_controls():
+    flat = np.array(
+        [
+            0.0,
+            1.0,
+            2.0,
+            0.2,
+            -0.5,
+            -1.0,
+            0.4,
+            0.0,
+            0.3,
+            0.6,
+            0.5,
+            0.0,
+            2.0,
+            -2.0,
+            0.8,
+        ],
+        dtype=np.float32,
+    )
+
+    block = flatten_model_action_to_block(flat, action_dim=15)
+
+    assert block.shape == (5, 3)
+    assert block[0].tolist() == pytest.approx([0.0, 1.0, 1.0])
+    assert block[1].tolist() == pytest.approx([0.2, -0.5, 0.0])
+    assert block[-1].tolist() == pytest.approx([1.0, -1.0, 0.8])
 
 
 def test_cem_score_samples_keeps_history_action_dim_frameskip_times_three():
@@ -260,6 +291,11 @@ def test_lane_keep_policy_dry_run_does_not_require_checkpoint(tmp_path):
     assert out["status"] == "config_loaded"
     assert out["policy"] == "lane_keep"
     assert out["route_cap_m"] == 80.0
+
+
+def test_model_action_policy_normalizes_to_model_backed_action():
+    assert normalize_policy("action") == "model_action"
+    assert normalize_policy("model_action_lane_keep") == "model_action_lane_keep"
 
 
 def test_apply_cli_overrides_supports_short_eval_knobs(tmp_path):

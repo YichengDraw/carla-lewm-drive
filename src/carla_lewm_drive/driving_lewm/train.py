@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--num-workers", type=int, default=None)
     parser.add_argument("--max-epochs", type=int, default=None)
+    parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--limit-train-batches", type=int, default=None)
     parser.add_argument("--limit-val-batches", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -260,17 +261,29 @@ def train(cfg: dict[str, Any], *, no_wandb: bool = False) -> Path:
     best_val = float("inf")
     best_path = output_dir / "best.pt"
     max_epochs = int(cfg["trainer"]["max_epochs"])
+    max_steps_cfg = cfg["trainer"].get("max_steps")
+    max_steps = int(max_steps_cfg) if max_steps_cfg is not None else None
+    patience_cfg = cfg["trainer"].get("early_stop_patience_evals")
+    early_stop_patience = int(patience_cfg) if patience_cfg is not None else None
+    early_stop_min_steps = int(cfg["trainer"].get("early_stop_min_steps", 0))
+    early_stop_min_delta = float(cfg["trainer"].get("early_stop_min_delta", 0.0))
     log_every = int(cfg["trainer"].get("log_every_steps", 50))
     eval_every = max(1, int(cfg["trainer"].get("eval_every_epochs", 1)))
     limit_train = cfg.get("limit_train_batches") or cfg["trainer"].get("limit_train_batches")
     limit_val = cfg.get("limit_val_batches") or cfg["trainer"].get("limit_val_batches")
     global_step = 0
+    bad_eval_count = 0
 
+    stop_reason = "max_epochs"
     for epoch in range(1, max_epochs + 1):
+        stop_after_eval = False
         model.train()
         epoch_losses = []
         iterator = tqdm(train_loader, desc=f"epoch {epoch}/{max_epochs}", leave=False)
         for step, batch in enumerate(iterator, start=1):
+            if max_steps is not None and global_step >= max_steps:
+                stop_reason = "max_steps"
+                break
             if limit_train is not None and step > int(limit_train):
                 break
             batch = move_batch(batch, device)
@@ -296,8 +309,12 @@ def train(cfg: dict[str, Any], *, no_wandb: bool = False) -> Path:
                 append_metrics(metrics_csv, payload)
                 if wandb_run is not None:
                     wandb_run.log(payload, step=global_step)
+            if max_steps is not None and global_step >= max_steps:
+                stop_reason = "max_steps"
+                break
 
-        should_eval = epoch == max_epochs or epoch % eval_every == 0
+        reached_step_cap = max_steps is not None and global_step >= max_steps
+        should_eval = epoch == max_epochs or epoch % eval_every == 0 or reached_step_cap
         if should_eval:
             val_losses = evaluate_loss(model, val_loader, device, cfg, limit_val)
             val_row = {
@@ -310,19 +327,42 @@ def train(cfg: dict[str, Any], *, no_wandb: bool = False) -> Path:
             append_metrics(metrics_csv, val_row)
             if wandb_run is not None:
                 wandb_run.log(val_row, step=global_step)
-            if val_losses["loss"] < best_val:
+            improved = val_losses["loss"] < best_val - early_stop_min_delta
+            if improved:
                 best_val = val_losses["loss"]
+                bad_eval_count = 0
                 torch.save(
                     {
                         "model": model.state_dict(),
                         "cfg": cfg,
                         "best_val": best_val,
-                        "best": {"val/loss": best_val, "epoch": epoch},
+                        "best": {"val/loss": best_val, "epoch": epoch, "step": global_step},
                         "epoch": epoch,
+                        "global_step": global_step,
                     },
                     best_path,
                 )
-        torch.save({"model": model.state_dict(), "cfg": cfg, "epoch": epoch}, output_dir / "last.pt")
+            else:
+                bad_eval_count += 1
+            if (
+                early_stop_patience is not None
+                and global_step >= early_stop_min_steps
+                and bad_eval_count >= early_stop_patience
+            ):
+                stop_reason = "early_stop_val_loss"
+                stop_after_eval = True
+        torch.save(
+            {
+                "model": model.state_dict(),
+                "cfg": cfg,
+                "epoch": epoch,
+                "global_step": global_step,
+                "stop_reason": stop_reason,
+            },
+            output_dir / "last.pt",
+        )
+        if reached_step_cap or stop_after_eval:
+            break
 
     test_loader = make_loader(test_set, cfg, shuffle=False)
     test_checkpoint = best_path if best_path.exists() else output_dir / "last.pt"
@@ -345,6 +385,8 @@ def train(cfg: dict[str, Any], *, no_wandb: bool = False) -> Path:
             "kind": checkpoint_kind,
             "path": str(test_checkpoint),
             "epoch": checkpoint.get("epoch"),
+            "global_step": checkpoint.get("global_step"),
+            "stop_reason": stop_reason,
             "best_val/loss": checkpoint.get("best_val"),
         },
         "test": loss_values(test_losses),
@@ -394,6 +436,8 @@ def main() -> None:
         cfg["trainer"]["num_workers"] = int(args.num_workers)
     if args.max_epochs is not None:
         cfg["trainer"]["max_epochs"] = int(args.max_epochs)
+    if args.max_steps is not None:
+        cfg["trainer"]["max_steps"] = int(args.max_steps)
     if args.output_dir is not None:
         cfg["run"]["output_dir"] = str(args.output_dir)
     if args.run_name is not None:

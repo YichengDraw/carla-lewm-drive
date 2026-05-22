@@ -14,6 +14,7 @@ The project is intentionally narrow: start with an easy single-ego CARLA setting
 - Compact Driving-LeWM with ViT `tiny` and `small` configs, latent prediction, SIGReg-style regularization, and auxiliary driving heads.
 - W&B logging for serious runs plus local `metrics.csv`, `split_manifest.json`, `best.pt`, and `test_metrics.json`.
 - Closed-loop evaluator for CARLA autopilot baselines, checkpoint-driven model control, lane-keep/hybrid sanity checks, and speed-limit-aware `Infraction-Free Distance` / `Mini Driving Score`.
+- Action-prior extension: an optional latent action head and `max_steps` training cap for the next 10k-step control experiment.
 - Interactive Chinese project dashboard at `interactive_plan.html`.
 
 ## Current Evidence
@@ -36,7 +37,7 @@ Status after the first D0 execution pass:
 - Speed-gated tiny model + lane-keep steering without speed governor: failed at `24.17m` from speed-limit violation, proving the fair metric must include speed rules.
 - Speed-gated tiny model + lane/speed governor: 200m pass, 100.0 mini score, max lane offset `0.094m`, max speed `6.57m/s`.
 
-Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified model-driven D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not solve steering or speed compliance. The current fair 200m pass is a governed hybrid sanity result, not a fully autonomous model-control result.
+Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified model-driven D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not solve steering or speed compliance. The current fair 200m pass is a governed hybrid sanity result, not a fully autonomous model-control result. The next execution gate is documented in `docs/NEXT_ACTION_PLAN.md`.
 
 ## Installation
 
@@ -107,6 +108,18 @@ carla-lewm-train --config configs/train_tiny.yaml \
 
 Use `configs/train_small.yaml` only after tiny has failed a controlled gate. In this D0 run, small delta-progress + predicted-aux did not improve the throttle-only 200m boundary or the steering-safe 150m gate, so the next useful work is control/objective calibration rather than a larger ViT.
 
+Next control-focused tiny run:
+
+```bash
+carla-lewm-train --config configs/train_tiny_action_prior_10k.yaml \
+  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
+  --batch-size 192 \
+  --num-workers 2 \
+  --max-steps 10000 \
+  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_10k \
+  --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
+```
+
 ## Evaluation
 
 The metric layer is implemented in `carla_lewm_drive.closed_loop_eval.metrics`. Full closed-loop evaluation requires a running CARLA server and a trained checkpoint:
@@ -139,6 +152,15 @@ carla-lewm-eval --config configs/eval_d0_model_lane_keep.yaml \
   --output-dir outputs/d0_eval_tiny_model_lane_keep_200m_speedgate_v1
 carla-lewm-eval --config configs/eval_d0_model_lane_keep_governed.yaml \
   --output-dir outputs/d0_eval_tiny_model_lane_keep_governed_200m_v1
+```
+
+After the action-prior checkpoint exists:
+
+```bash
+carla-lewm-eval --config configs/eval_d0_model_action_speedgate.yaml \
+  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m
+carla-lewm-eval --config configs/eval_d0_model_action_lane_keep_speedgate.yaml \
+  --output-dir outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m
 ```
 
 ## Interactive Plan
