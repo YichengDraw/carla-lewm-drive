@@ -122,10 +122,10 @@
           <div class="metric"><span>Clean no-aux</span><strong>running</strong><span><code>use_aux_head: false</code>，aux/pred_aux 全程 0</span></div>
           <div class="metric"><span>Best val</span><strong>0.15595</strong><span>epoch 27 / step 3942，仍在训练</span></div>
           <div class="metric"><span>Monitor</span><strong>5min</strong><span><code>outputs/remote_logs/d1_noaux_watch.log</code></span></div>
-          <div class="metric"><span>Step</span><strong>&gt;4050</strong><span>20k 上限，等待 early-stop 或 plateau</span></div>
+          <div class="metric"><span>Auto eval</span><strong>armed</strong><span><code>d1_auto_eval_noaux</code> 等训练结束后跑 D1-A</span></div>
         </div>
         <p>当前 W&B run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7"><code>d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7</code></a>。</p>
-        <div class="callout ok">截至 2026-05-23 14:56 Asia/Shanghai，训练进入 epoch 28；validation loss 已从 epoch 1 的 0.2819 改善到 epoch 27 / step 3942 的 0.15595。aux/pred_aux 指标全程为 0，确认主 run 是真正 no-aux。闭环 D1-A 评估等待训练 early-stop、自然停止，或出现清晰 plateau 后再跑。</div>
+        <div class="callout ok">截至 2026-05-23 15:01 Asia/Shanghai，训练进入 epoch 29；validation loss 已从 epoch 1 的 0.2819 改善到 epoch 27 / step 3942 的 0.15595，epoch 28 回落到 0.16829。aux/pred_aux 指标全程为 0，确认主 run 是真正 no-aux。<code>d1_auto_eval_noaux</code> 已挂起，会在训练 tmux 结束后启动 CARLA 2100 并运行 D1-A。</div>
       </section>
 
       <section id="task" data-kind="task">
