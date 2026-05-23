@@ -1,10 +1,12 @@
 # Current Execution Status
 
-Last checked: 2026-05-23 19:26 Asia/Shanghai.
+Last checked: 2026-05-23 22:25 Asia/Shanghai.
 
 ## Verdict
 
 The first strict D0 pass is complete end to end: clean CARLA data was collected, QC passed, tiny and small historical LeWM variants were trained with W&B, a tiny delta-progress + predicted-aux variant was trained, and closed-loop CARLA evaluation now has timing guards plus speed-limit-aware scoring.
+
+The active long-horizon goal is now stricter: a learned model must drive at least `1km` on city streets without lane/roadside departure, collision, or blocked failure, and then pass a real-traffic-light variant with no red-light violations. Exploration should continue until this target is met; weather mixing and larger ViT are subordinate to the single-weather safety gate.
 
 The current valid model-only success claim is intentionally narrow: on an isolated CARLA server and a throttle-only D0 target, the latest tiny and small delta/pred-aux checkpoints reach 190m with no hard infractions. At 200m they fail by off-road at 191.75m and 191.67m, and steering-safe 150m still fails at 107.63m and 103.42m.
 
@@ -15,6 +17,10 @@ The action-prior branch has now run for 10,000 optimizer steps. It improved offl
 D1-A no-aux tiny has now completed and did not pass the small-scope gate. The dataset quality was good: `48,000` frames across `60` episodes and six Town03 spawn routes, strict QC passed with zero collision/off-road/red-light/blocked frames, and sampled contact sheets were inspected before training. The run `d1_tiny_h3_fs5_core_action_noaux_20k` used `use_aux_head: false` with `aux_loss=0` and `pred_aux_loss=0`; training stopped by early stop after epoch `60` / step `8760`. Total-validation best was epoch `40` / step `5840` with `val/loss=0.13641`; action-best was epoch `52` / step `7592` with `val/action_loss=0.002903`.
 
 Closed-loop D1-A failed on both checkpoints after fixing the evaluator policy override. Total-best reached mean Safety IFD `23.19m`; action-best reached `29.77m`; both had `0/6` primary-safety-success and `6/6` off-road failures. Contact sheets were copied to `outputs_d1_eval_total_policyfix_contact_sheet.jpg` and `outputs_d1_eval_best_action_policyfix_contact_sheet.jpg`. Contact sheets and action traces show a consistent learned-control issue: the model outputs near-constant throttle with a small left steering bias, lane offset drifts toward about `+-1.8m`, and the vehicle leaves the road. This is not yet a weather-robustness or model-size question, so D1-W mixed weather and ViT small are paused.
+
+The first action-failure diagnostic confirms steering collapse. On a light test split sample, the expert target steering has mean/std `-0.01106 / 0.11660`, while total-best predicts `-0.02599 / 0.01747` with steering correlation `0.0055`; action-best predicts `-0.02355 / 0.03072` with steering correlation `-0.0452`. In other words, the offline action loss looked small while the steering channel lost most of its variance and feedback structure. The next required baseline is action-only BC plus a deterministic 1km control gate.
+
+The deterministic 1km control gate is partly passed. On the full six-route set `[3, 4, 6, 8, 10, 12]`, lane-keep reached `1000m` cleanly on five routes and failed off-road on spawn `8` at `231.62m`, for mean Safety IFD `871.94m` and primary-safety success `5/6`. This confirms that a simple 1km city route is feasible, while spawn `8` should be treated as a separate route-conditioning/recovery case. The immediate learned-policy gate is now `D1-simple-1km`: spawn routes `[3, 4, 6, 10, 12]`, no traffic, forced green lights, `1000m` cap, and no collision/off-road/blocked/red-light. Action-only BC 10k is running on the 5090 with W&B enabled: `d1_tiny_h3_fs5_action_only_bc_10k-20260523-222519-3bb58927`.
 
 ## Repository And Environment
 
@@ -81,6 +87,8 @@ Batch/resource notes:
 | Action-prior `model_action_lane_keep` | 1 | 200m | isolated port 2100, exclusive + brake-release speed governor | 200.00m | 100.0 | governed hybrid pass |
 | D1 no-aux total-best `model_action` | 6 | 500m | isolated port 2100, no traffic, green lights | 23.19m | 3.25 | failed off-road on 6/6 routes |
 | D1 no-aux action-best `model_action` | 6 | 500m | isolated port 2100, no traffic, green lights | 29.77m | 4.17 | failed off-road on 6/6 routes |
+| D1 lane-keep controller full-6 | 6 | 1000m | isolated port 2100, no traffic, green lights | 871.94m | 86.04 | 5/6 clean; spawn 8 off-road at 231.62m |
+| D1 lane-keep controller simple-5 | 5 | 1000m | subset of full-6 routes: [3, 4, 6, 10, 12] | 1000.00m | 100.0 | derived pass from full-6 episode table |
 | Tiny checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 | Small checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 
@@ -110,8 +118,10 @@ Interpretation:
 The active next gate is D1 action-policy diagnosis, not weather or scale:
 
 1. Compare expert action distribution against predicted action traces route by route, especially steering sign, mean, and variance.
-2. Train or evaluate a simple supervised behavior-cloning policy on the same D1 dataset as a control baseline; if BC fails similarly, the dataset/task interface is the bottleneck.
-3. Add recovery/perturbation data or route-command labels before another long LeWM run; current pure no-aux action decoding lacks lane-correction behavior.
-4. Keep D1-W mixed weather paused until D1-A has a real single-weather closed-loop signal.
-5. Keep ViT small paused until the failure looks like capacity or visual robustness rather than action decoding / task conditioning.
-6. Run `aux + pred_aux` only as an ablation after the action-policy baseline is diagnosed; if it wins, report it as an engineering adapter, not the clean LeWM story.
+2. Use `configs/eval_d1_city_free_drive_model_action_1km_simple.yaml` as the first 1km learned-policy gate because the deterministic controller already proves those five routes are feasible.
+3. Keep `configs/eval_d1_city_free_drive_model_action_1km.yaml` as the full-6 stress gate; spawn `8` is now a route-conditioning/recovery diagnostic, not the first success criterion.
+4. Train or evaluate `configs/train_d1_tiny_action_only_bc_10k.yaml` on the same D1 dataset as a control baseline; if BC fails similarly, the dataset/task interface is the bottleneck.
+5. Add recovery/perturbation data or route-command labels before another long LeWM run; current pure no-aux action decoding lacks lane-correction behavior.
+6. Keep D1-W mixed weather paused until D1-A has a real single-weather closed-loop signal.
+7. Keep ViT small paused until the failure looks like capacity or visual robustness rather than action decoding / task conditioning.
+8. Run `aux + pred_aux` only as an ablation after the action-policy baseline is diagnosed; if it wins, report it as an engineering adapter, not the clean LeWM story.

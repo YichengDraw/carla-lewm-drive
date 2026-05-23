@@ -1,6 +1,10 @@
-# Next Execution Plan: D1 No-Traffic City Free-Drive
+# Next Execution Plan: D1 1km City Driving
 
-Last updated: 2026-05-23 19:26 Asia/Shanghai.
+Last updated: 2026-05-23 22:25 Asia/Shanghai.
+
+## Long-Horizon Goal
+
+Continue exploration until a learned model can drive at least `1km` on a CARLA city street without lane/roadside departure, collision, or blocked failure, and then pass a real-traffic-light variant without red-light violations. This is the stop condition for the research loop. Weather mixing and larger ViT are useful only after the single-weather safety/control interface starts working.
 
 ## Current Interpretation
 
@@ -24,9 +28,13 @@ Speed remains logged and penalized, but the main score is safety-distance before
 
 The first D1-A no-aux tiny run has now answered the smallest-scope question negatively. After fixing evaluator policy resolution so `--checkpoint` no longer overwrites `policy: model_action`, the total-best checkpoint reached mean Safety IFD `23.19m`, and the action-best checkpoint reached `29.77m`. Both failed off-road on all 6 routes. Contact sheets and action traces show near-constant throttle plus a small steering bias, not active lane correction. This is below the threshold for D1-W weather mixing or ViT small.
 
+The action failure is now quantified: expert steering on a held-out sample has std `0.11660`, while total-best predicts std `0.01747` and action-best predicts std `0.03072`; steering correlation with the target is near zero. The next step is therefore not a larger world model. It is a control-interface diagnosis: prove the 1km route with deterministic lane keeping, then train action-only BC on the same dataset.
+
+The deterministic 1km check returned a useful split instead of a clean full pass: lane-keep finished `1000m` on spawn routes `3`, `4`, `6`, `10`, and `12`, but failed off-road on spawn `8` at `231.62m`. The current first learned-policy target is therefore `D1-simple-1km`: the five controller-validated routes, no traffic, forced green lights, `1000m` cap, and primary safety success on every route. The original six-route config remains as `D1-full-6` stress evaluation and as evidence that spawn `8` needs route conditioning or recovery data.
+
 ## Task Definition
 
-### D1-A: City Free-Drive, No Traffic, Green Lights
+### D1-simple-1km: City Free-Drive, No Traffic, Green Lights
 
 Purpose: isolate vision, steering, road-boundary awareness, and long-horizon drift.
 
@@ -34,13 +42,21 @@ Purpose: isolate vision, steering, road-boundary awareness, and long-horizon dri
 - Traffic: `vehicles: 0`, `walkers: 0`.
 - Weather: `ClearNoon`.
 - Lights: `force_green_lights: true`.
-- Routes: six fixed spawn indices, cycled deterministically.
+- Routes: five controller-validated fixed spawn indices `[3, 4, 6, 10, 12]`, cycled deterministically.
 - Maneuvers: include natural straight, curve, and intersection driving from fixed routes. This covers left/right road geometry when the route naturally turns.
 - Commanded lane changes are intentionally deferred until route-command labels exist. In a no-traffic setting, "change lane now" is not a well-defined target unless the dataset includes an explicit command or navigation objective.
-- Episode target: `500m` closed-loop cap.
+- Episode target: `1000m` closed-loop cap.
 - Primary metric: `Safety IFD`, meters before collision, off-road, or blocked.
 - Secondary logs: lane offset, heading error, action trace, contact sheet.
 - Speed: soft penalty only; do not stop the episode on normal speed-limit violations.
+
+### D1-full-6: Stress Route Set
+
+Purpose: keep the original six-route definition visible and fair after the first 1km learned-policy pass.
+
+- Routes: `[3, 4, 6, 8, 10, 12]`.
+- Current deterministic lane-keep result: `5/6` clean `1000m`; spawn `8` failed off-road at `231.62m`.
+- Interpretation: spawn `8` is not removed from the research problem. It is promoted to a diagnostic route for route commands, recovery data, or a stronger controller/planner interface after `D1-simple-1km` is solved.
 
 ### D1-B: City Free-Drive, No Traffic, Real Lights
 
@@ -189,6 +205,46 @@ Run ViT small only after the task has earned it:
 
 Current gate status: paused. The observed D1-A failure is before `50m` and looks like action decoding / closed-loop correction failure, so increasing ViT size is not the next experiment.
 
+## Immediate Diagnostic Loop
+
+### Gate 1: Deterministic 1km Control
+
+Run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d1_city_free_drive_lane_keep_1km.yaml
+```
+
+Observed result: the full six-route gate reached `1000m` cleanly on five routes and failed off-road on spawn `8` at `231.62m`, with mean Safety IFD `871.94m` and primary-safety success `5/6`.
+
+Decision: first use the five passing routes as `D1-simple-1km`, then keep spawn `8` as the route-conditioning/recovery stress case.
+
+### Gate 2: Action-Only BC Baseline
+
+Run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_d1_tiny_action_only_bc_10k.yaml \
+  --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5
+```
+
+Then evaluate:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d1_city_free_drive_model_action_1km_simple.yaml \
+  --checkpoint outputs/d1_tiny_h3_fs5_action_only_bc_10k/best.pt
+```
+
+Decision rule:
+
+- If BC also fails near 30m on `D1-simple-1km`, prioritize action representation, route commands, and recovery data before another LeWM run.
+- If BC reaches hundreds of meters or 1km on `D1-simple-1km`, the dataset/action interface is viable and the LeWM objective/action coupling is the bottleneck.
+- If BC wins, it becomes the control baseline that future LeWM variants must beat.
+- After any `D1-simple-1km` pass, run `configs/eval_d1_city_free_drive_model_action_1km.yaml` on the full six-route set and report spawn `8` separately.
+
 ## Evaluation Plan
 
 Run D1-A first:
@@ -224,7 +280,7 @@ For aux ablation, reuse the same eval configs with `--checkpoint` and `--output-
 Continue from D1-A to D1-B if:
 
 - six-route D1 dataset passes strict QC;
-- autopilot/lane-keep baseline passes the same route cap;
+- lane-keep proves the simple route cap and the learned model reaches `1000m` on `D1-simple-1km`;
 - no-aux tiny has finite W&B curves and improves validation action loss;
 - closed-loop D1-A mean Safety IFD is meaningfully above the old 25m speed-failure boundary;
 - contact sheets show road-following rather than accidental straight-line survival.

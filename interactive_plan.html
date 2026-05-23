@@ -71,7 +71,7 @@
 <body>
   <header>
     <h1>CARLA-LeWM D1 城市自由行驶计划</h1>
-    <p>D1-A 已完成第一轮 no-aux tiny 闭环评估：数据和训练链路成立，但模型仍在 30m 左右离路；多天气和更大 ViT 暂停。</p>
+    <p>当前硬目标是让 learned policy 在简单城市街道无碰撞、无离路、无 blocked 的条件下跑满 1km；先过 no-traffic/green-light，再回到真实红绿灯。</p>
   </header>
   <div class="toolbar">
     <input id="search" placeholder="搜索 D1 / aux / W&B / IFD / noaux / red light">
@@ -106,12 +106,12 @@
           <div class="metric"><span>D0 model-only</span><strong>190m</strong><span>throttle-only 简化目标通过</span></div>
           <div class="metric"><span>D0 pure action</span><strong>~25m</strong><span>无碰撞/离路，因限速停表</span></div>
           <div class="metric"><span>D0 governed hybrid</span><strong>200m</strong><span>lane/speed governor 参与</span></div>
-          <div class="metric"><span>D1 total-best</span><strong>23.19m</strong><span>6/6 off-road，0% primary success</span></div>
-          <div class="metric"><span>D1 action-best</span><strong>29.77m</strong><span>6/6 off-road，0% primary success</span></div>
-          <div class="metric"><span>Next gate</span><strong>diagnose</strong><span>先查动作解码/数据恢复，不扩天气或模型</span></div>
+          <div class="metric"><span>D1 no-aux total-best</span><strong>23.19m</strong><span>6/6 off-road，0% primary success</span></div>
+          <div class="metric"><span>D1 lane_keep full-6</span><strong>871.94m</strong><span>5/6 过 1km；spawn 8 在 231.62m 离路</span></div>
+          <div class="metric"><span>Next gate</span><strong>BC 1km</strong><span><code>D1-simple-1km</code> 五条控制器验证路线</span></div>
         </div>
-        <div class="callout bad">
-          当前结论：D1-A 小范围任务没有成功。失败不是红灯、碰撞或限速，而是 action policy 输出近似固定的小左转，车辆逐渐离开车道。D1-W 多天气混训和 ViT small 先暂停，下一步做动作分布、BC baseline、recovery data / route command 诊断。
+        <div class="callout">
+          当前结论：no-aux tiny learned action 仍失败在 30m 左右，原因已量化为 steering collapse。控制器验证显示五条 Town03 路线能稳定跑满 1km，spawn 8 是单独的 route-conditioning/recovery 压力点。下一步正在训练 action-only BC，目标是在 <code>D1-simple-1km</code> 上先拿到 learned-policy 1km。
         </div>
       </section>
 
@@ -125,9 +125,11 @@
           <div class="metric"><span>Eval fix</span><strong>d18a55d</strong><span><code>--checkpoint</code> 不再覆盖 <code>model_action</code></span></div>
           <div class="metric"><span>Best action</span><strong>0.002903</strong><span>epoch 52 / step 7592，已保存 <code>best_action.pt</code></span></div>
           <div class="metric"><span>Closed-loop</span><strong>failed</strong><span>total-best 23.19m；action-best 29.77m</span></div>
+          <div class="metric"><span>Lane_keep 1km</span><strong>5/6</strong><span>simple-5 derived pass；full-6 spawn 8 failed</span></div>
+          <div class="metric"><span>Action-only BC</span><strong>running</strong><span><code>d1_tiny_h3_fs5_action_only_bc_10k</code></span></div>
         </div>
-        <p>当前 W&B run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7"><code>d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7</code></a>。</p>
-        <div class="callout bad">截至 2026-05-23 19:26 Asia/Shanghai，训练已 early-stop，测试指标已写入；远端修复后完成 D1-A 闭环评估。<code>outputs/d1_eval_tiny_core_action_noaux_model_action_total_policyfix_500m</code> 的 mean Safety IFD 是 23.19m；<code>outputs/d1_eval_tiny_core_action_noaux_model_action_best_action_policyfix_500m</code> 是 29.77m。两者都是 6/6 off-road，primary safety success 为 0%。</div>
+        <p>当前 W&B run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_action_only_bc_10k-20260523-222519-3bb58927"><code>d1_tiny_h3_fs5_action_only_bc_10k-20260523-222519-3bb58927</code></a>。上一轮 no-aux run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7"><code>d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7</code></a>。</p>
+        <div class="callout">截至 2026-05-23 22:25 Asia/Shanghai，D1 no-aux 训练已 early-stop；远端完成 1km 控制器门控。<code>outputs/d1_eval_lane_keep_1km</code> 的 full-6 mean Safety IFD 是 871.94m，simple-5 是派生 1000m pass。当前 5090 上正在运行 <code>train_d1_tiny_action_only_bc_10k.yaml</code>。</div>
       </section>
 
       <section id="task" data-kind="task">
@@ -135,10 +137,16 @@
         <table>
           <tr><th>阶段</th><th>场景</th><th>规则</th><th>通过含义</th></tr>
           <tr>
-            <td><code>D1-A</code></td>
-            <td>Town03，白天，干路面，无车，无行人，绿灯，6 个固定 spawn route。</td>
-            <td>500m cap；collision/off-road/blocked 立即停表；speed-limit 只记软惩罚；覆盖自然直行、弯道、路口左/右转。</td>
-            <td>模型能在城市道路视觉分布上保持车道和路边安全。</td>
+            <td><code>D1-simple-1km</code></td>
+            <td>Town03，白天，干路面，无车，无行人，绿灯，5 个控制器验证 spawn route：3/4/6/10/12。</td>
+            <td>1000m cap；collision/off-road/blocked/red-light 立即停表；speed-limit 只记软惩罚；覆盖自然直行、弯道和路口几何。</td>
+            <td>当前第一阶段 learned-policy 成功门槛：城市道路视觉闭环跑满 1km。</td>
+          </tr>
+          <tr>
+            <td><code>D1-full-6</code></td>
+            <td>原始 6 route：3/4/6/8/10/12。</td>
+            <td>同 simple-1km；spawn 8 在 lane_keep 控制器下 231.62m 离路。</td>
+            <td>后续 stress gate，用于 route command / recovery data 诊断。</td>
           </tr>
           <tr>
             <td><code>D1-B</code></td>
@@ -202,6 +210,11 @@
             <td>no-aux tiny early-stop at step 8760；total-best 23.19m；action-best 29.77m；D1-A 6 routes 全部 off-road。逐帧 contact sheet：<a href="outputs_d1_eval_total_policyfix_contact_sheet.jpg">total-best</a>、<a href="outputs_d1_eval_best_action_policyfix_contact_sheet.jpg">action-best</a>。</td>
             <td>小范围单天气任务未成功；下一步查 action decoding、BC baseline、recovery data 和 route command。</td>
           </tr>
+          <tr>
+            <td><code>d1_city_free_drive_lane_keep_1km</code></td>
+            <td>full-6 lane_keep 控制器 1km eval：5/6 路线干净通过，spawn 8 在 231.62m off-road；contact sheet：<a href="outputs_d1_eval_lane_keep_1km_contact_sheet.jpg">lane_keep 1km</a>。</td>
+            <td>评估器和五条简单城市路线可支持 1km 目标；spawn 8 保留为后续压力测试。</td>
+          </tr>
         </table>
       </section>
 
@@ -213,17 +226,18 @@
           <tr><td>2</td><td><code>outputs/qc_d1_city_free_drive</code></td><td>逐帧 QC + contact sheet 人工检查。</td><td><span class="tag good">done</span></td></tr>
           <tr><td>3</td><td><code>train_d1_tiny_core_action_noaux_20k.yaml</code></td><td>主 baseline：no-aux tiny action policy。</td><td><span class="tag bad">failed gate</span></td></tr>
           <tr><td>4</td><td><code>eval_d1_city_free_drive_model_action.yaml</code></td><td>D1-A 500m 安全距离评估；total-best 23.19m，action-best 29.77m。</td><td><span class="tag bad">done / fail</span></td></tr>
-          <tr><td>5</td><td><code>D1-W weather mix</code></td><td>D1-A 成立后，用 Clear/Cloudy/Wet/SoftRain 多天气混训并按天气分开评估。</td><td><span class="tag warn">paused</span></td></tr>
-          <tr><td>6</td><td><code>train_d1_tiny_core_action_aux_ablation_20k.yaml</code></td><td>不作为主故事；动作策略诊断后再决定是否跑工程消融。</td><td><span class="tag warn">paused</span></td></tr>
-          <tr><td>7</td><td><code>eval_d1_city_free_drive_model_action_lights.yaml</code></td><td>D1-B 真实红绿灯评估。</td><td><span class="tag">conditional</span></td></tr>
-          <tr><td>8</td><td><code>ViT small</code></td><td>tiny 已有闭环信号后再放大；保持同一 no-aux 目标和同一评估套件。</td><td><span class="tag warn">paused</span></td></tr>
+          <tr><td>5</td><td><code>eval_d1_city_free_drive_lane_keep_1km.yaml</code></td><td>full-6 控制器 1km gate；5/6 pass，spawn 8 failed。</td><td><span class="tag warn">done / split</span></td></tr>
+          <tr><td>6</td><td><code>train_d1_tiny_action_only_bc_10k.yaml</code></td><td>关掉 latent prediction 权重，先测纯 action BC 能否学到 steering feedback。</td><td><span class="tag">running</span></td></tr>
+          <tr><td>7</td><td><code>eval_d1_city_free_drive_model_action_1km_simple.yaml</code></td><td>当前 learned-policy 1km 主门控：五条控制器验证路线。</td><td><span class="tag">next</span></td></tr>
+          <tr><td>8</td><td><code>D1-W weather mix</code></td><td>D1-simple-1km 成立后，用 Clear/Cloudy/Wet/SoftRain 多天气混训并按天气分开评估。</td><td><span class="tag warn">paused</span></td></tr>
+          <tr><td>9</td><td><code>ViT small</code></td><td>tiny 已有闭环信号后再放大；保持同一 no-aux 目标和同一评估套件。</td><td><span class="tag warn">paused</span></td></tr>
         </table>
       </section>
 
       <section id="scaleout" data-kind="all">
         <h2>扩展路线</h2>
         <div class="grid">
-          <div class="callout bad"><strong>小范围未过</strong><br>D1-A no-aux tiny 的 action-best 只有 29.77m，6/6 off-road。当前先修任务、数据、动作解码。</div>
+          <div class="callout bad"><strong>小范围 learned policy 未过</strong><br>D1 no-aux tiny 的 action-best 只有 29.77m，6/6 off-road。当前先修 action decoding 和 BC baseline。</div>
           <div class="callout"><strong>天气鲁棒暂停</strong><br>D1-W 的 <code>ClearNoon</code>、<code>CloudyNoon</code>、<code>WetNoon</code>、<code>SoftRainNoon</code> 仍是后续路线，但只有单天气 D1-A 过门槛后启动。</div>
           <div class="callout"><strong>模型放大暂停</strong><br>ViT small 只在 tiny 已经有闭环信号、并且失败像 capacity/visual robustness，而不是 action decoding 或任务接口错误时启动。</div>
           <div class="callout"><strong>仍不加车</strong><br>车辆、行人、命令化变道进入 D2/D1-C；多天气阶段继续保持 no traffic，把变量隔离清楚。</div>
@@ -271,16 +285,22 @@ PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
   --run-name d1_tiny_h3_fs5_core_action_noaux_20k
 
 PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --policy model_action \
-  --config configs/eval_d1_city_free_drive_model_action.yaml \
-  --output-dir outputs/d1_eval_tiny_core_action_noaux_model_action_500m</code></pre>
+  --config configs/eval_d1_city_free_drive_lane_keep_1km.yaml
+
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_d1_tiny_action_only_bc_10k.yaml \
+  --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5
+
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d1_city_free_drive_model_action_1km_simple.yaml \
+  --checkpoint outputs/d1_tiny_h3_fs5_action_only_bc_10k/best.pt</code></pre>
       </section>
 
       <section id="gates" data-kind="risk">
         <h2>Go / No-Go</h2>
         <div class="grid">
-          <div class="callout bad"><strong>Current stop</strong><br>D1 数据和 W&B 链路成立，但 no-aux tiny 在 D1-A 上 total-best 23.19m、action-best 29.77m，6/6 off-road；不进入 D1-W 或 ViT small。</div>
-          <div class="callout"><strong>Pause</strong><br>某些 spawn route 反复被 QC 拒绝；lane offset 随距离单调变大；速度软惩罚很多但安全距离提高，需要先分析 trace 再改损失。</div>
+          <div class="callout"><strong>Current go</strong><br>控制器 simple-5 已经具备 1km 可达性；当前继续 action-only BC 训练并用 simple-1km 闭环评估。</div>
+          <div class="callout"><strong>Pause</strong><br>spawn 8 在控制器下 231.62m 离路；该路线进入 route-command/recovery 数据诊断，不作为第一阶段 learned-policy 成功门槛。</div>
           <div class="callout bad"><strong>Stop</strong><br>CARLA timing guard 报外部 tick；W&B 缺失；no-aux 和 aux 都在 50m 内出现 primary safety failure。</div>
           <div class="callout"><strong>Next diagnose</strong><br>对比专家/预测动作分布，跑简单 BC baseline，加入 recovery data 或 route command 后再决定是否继续训练。</div>
         </div>
@@ -291,6 +311,10 @@ PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
         <table>
           <tr><th>Term</th><th>解释</th></tr>
           <tr><td><code>Safety IFD</code></td><td>安全优先的 infraction-free distance；D1-A 中不因普通超速提前停表。</td></tr>
+          <tr><td><code>D1-simple-1km</code></td><td>五条控制器已验证的 Town03 路线，目标是 learned policy 在无车、绿灯下跑满 1000m。</td></tr>
+          <tr><td><code>D1-full-6</code></td><td>原始六路线压力测试；包含 spawn 8，用于 route command / recovery 诊断。</td></tr>
+          <tr><td><code>BC</code></td><td>Behavior Cloning，直接监督模型预测 expert action，用来判断数据和动作接口是否足够。</td></tr>
+          <tr><td><code>lane_keep</code></td><td>确定性车道保持控制器；它不是 learned policy，只用来验证路线和评估器是否可达。</td></tr>
           <tr><td><code>primary safety failure</code></td><td>collision、off-road / roadside departure、blocked。</td></tr>
           <tr><td><code>red-light</code></td><td>D1-B 开启真实信号灯后纳入 hard failure。</td></tr>
           <tr><td><code>speed soft penalty</code></td><td>速度违规计数和扣分，但不主导第一轮 D1 安全距离。</td></tr>

@@ -149,5 +149,5 @@ def test_pred_weight_can_disable_latent_prediction_loss(monkeypatch):
 
     losses = model.loss(batch)
 
-    assert float(losses["pred_loss"]) > 0.0
-    assert float(losses["loss"]) == pytest.approx(float(losses["action_loss"]))
+    assert float(losses["pred_loss"].detach()) > 0.0
+    assert float(losses["loss"].detach()) == pytest.approx(float(losses["action_loss"].detach()))

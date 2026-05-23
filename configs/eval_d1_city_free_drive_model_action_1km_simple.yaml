@@ -1,0 +1,79 @@
+eval:
+  label: d1_city_free_drive_model_action_1km_simple
+  policy: model_action
+  dataset_path: data/d1_city_free_drive/carla_d1_city_free_drive.h5
+  checkpoint_path: outputs/d1_tiny_h3_fs5_action_only_bc_10k/best.pt
+  output_dir: outputs/d1_eval_action_only_bc_1km_simple
+  host: 127.0.0.1
+  port: 2100
+  timeout_s: 30.0
+  town: Town03
+  load_world: true
+  fixed_delta_seconds: 0.05
+  traffic_manager_port: 8100
+  traffic_manager_seed: 20260523
+  weather: ClearNoon
+  force_green_lights: true
+  route_spawn_indices: [3, 4, 6, 10, 12]
+  route_cap_m: 1000.0
+  target_speed_kmh: 20.0
+  max_episode_seconds: 260.0
+  eval_episodes: 5
+  blocked_speed_mps: 0.1
+  blocked_seconds: 3.0
+  blocked_grace_seconds: 5.0
+  max_sim_delta_multiplier: 2.5
+  red_light_speed_threshold_mps: 0.2
+  speed_limit_kmh: 35.0
+  speed_limit_seconds: 2.0
+  speed_limit_as_infraction: false
+  stop_on_collision: true
+  stop_on_offroad: true
+  stop_on_red_light: true
+  stop_on_blocked: true
+  stop_on_speed_limit: false
+  model_warmup_action: [0.0, 0.0, 1.0]
+  save_contact_sheet: true
+  contact_sheet_every: 80
+  max_contact_sheet_frames: 80
+  save_frames: false
+  save_action_trace: true
+  exclusive_throttle_brake: true
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+planner:
+  seed: 3072
+  horizon: 1
+  receding_horizon: 1
+  num_samples: 512
+  elite_frac: 0.1
+  iterations: 4
+  action_mean: [0.46, -0.013, 0.0]
+  action_std: [0.38, 0.03, 0.08]
+  action_low: [0.0, -0.20, 0.0]
+  action_high: [0.85, 0.20, 0.70]
+  exclusive_throttle_brake: true
+  min_action_std: 0.0001
+  cost:
+    progress_reward: 1.0
+    lane_offset_penalty: 2.0
+    heading_penalty: 0.5
+    speed_error_penalty: 0.10
+    collision_penalty: 120.0
+    offroad_penalty: 120.0
+    red_light_penalty: 80.0
+    blocked_penalty: 100.0
+    action_smoothness_penalty: 0.05
+    brake_penalty: 0.5
+    throttle_brake_conflict_penalty: 20.0
