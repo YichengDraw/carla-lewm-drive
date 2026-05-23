@@ -102,6 +102,7 @@ HTML = r"""<!doctype html>
       <a href="#task">D1 任务定义</a>
       <a href="#metrics">指标优先级</a>
       <a href="#aux">Aux 决策</a>
+      <a href="#live">实时状态</a>
       <a href="#evidence">已有证据</a>
       <a href="#matrix">实验矩阵</a>
       <a href="#decoder">实验名解码</a>
@@ -123,6 +124,20 @@ HTML = r"""<!doctype html>
         <div class="callout ok">
           方向调整：下一组不把限速失败当成主要瓶颈处理。先定义一个更透明的任务：在无其他车辆的城市道路上尽量开远，主失败是 collision / off-road / blocked；红灯是第二阶段；速度违规只降低分数和留下 trace。
         </div>
+      </section>
+
+      <section id="live" data-kind="train">
+        <h2>实时状态</h2>
+        <div class="metrics">
+          <div class="metric"><span>D1 数据</span><strong>48k</strong><span>60 episodes，strict QC pass，contact sheet 已检查</span></div>
+          <div class="metric"><span>Batch probe</span><strong>256</strong><span>RTX 5090 峰值 24.388GB，正式 run 用 workers=4</span></div>
+          <div class="metric"><span>Clean no-aux</span><strong>running</strong><span><code>use_aux_head: false</code>，aux/pred_aux 全程 0</span></div>
+          <div class="metric"><span>Best val</span><strong>0.2297</strong><span>epoch 6 / step 876，仍在训练</span></div>
+          <div class="metric"><span>Monitor</span><strong>5min</strong><span><code>outputs/remote_logs/d1_noaux_watch.log</code></span></div>
+          <div class="metric"><span>GitHub</span><strong>82e2040</strong><span>local main == origin/main</span></div>
+        </div>
+        <p>当前 W&B run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7"><code>d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7</code></a>。</p>
+        <div class="callout ok">截至 2026-05-23 12:46 Asia/Shanghai，训练进入 epoch 7；validation loss 已从 epoch 1 的 0.2819 改善到 epoch 6 的 0.2297。闭环 D1-A 评估等待训练达到 early-stop 最小步数或自然停止后再跑。</div>
       </section>
 
       <section id="task" data-kind="task">
@@ -198,9 +213,9 @@ HTML = r"""<!doctype html>
         <h2>实验矩阵</h2>
         <table>
           <tr><th>顺序</th><th>工件</th><th>目标</th><th>状态</th></tr>
-          <tr><td>1</td><td><code>configs/d1_city_free_drive.yaml</code></td><td>pilot 采集 60 episodes x 40s / 6 routes / no traffic / green lights，约 48k frames。</td><td><span class="tag good">ready</span></td></tr>
-          <tr><td>2</td><td><code>outputs/qc_d1_city_free_drive</code></td><td>逐帧 QC + contact sheet 人工检查。</td><td><span class="tag warn">run next</span></td></tr>
-          <tr><td>3</td><td><code>train_d1_tiny_core_action_noaux_20k.yaml</code></td><td>主 baseline：no-aux tiny action policy。</td><td><span class="tag good">ready</span></td></tr>
+          <tr><td>1</td><td><code>configs/d1_city_free_drive.yaml</code></td><td>pilot 采集 60 episodes x 40s / 6 routes / no traffic / green lights，约 48k frames。</td><td><span class="tag good">done</span></td></tr>
+          <tr><td>2</td><td><code>outputs/qc_d1_city_free_drive</code></td><td>逐帧 QC + contact sheet 人工检查。</td><td><span class="tag good">done</span></td></tr>
+          <tr><td>3</td><td><code>train_d1_tiny_core_action_noaux_20k.yaml</code></td><td>主 baseline：no-aux tiny action policy。</td><td><span class="tag warn">running</span></td></tr>
           <tr><td>4</td><td><code>eval_d1_city_free_drive_model_action.yaml</code></td><td>D1-A 500m 安全距离评估。</td><td><span class="tag good">ready</span></td></tr>
           <tr><td>5</td><td><code>train_d1_tiny_core_action_aux_ablation_20k.yaml</code></td><td>只在 no-aux 有结果后跑 aux 消融。</td><td><span class="tag good">ready</span></td></tr>
           <tr><td>6</td><td><code>eval_d1_city_free_drive_model_action_lights.yaml</code></td><td>D1-B 真实红绿灯评估。</td><td><span class="tag">conditional</span></td></tr>
