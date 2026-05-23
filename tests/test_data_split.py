@@ -1,5 +1,6 @@
 import h5py
 import numpy as np
+import torch
 
 from carla_lewm_drive.driving_lewm.data import CarlaSequenceDataset, split_episodes
 
@@ -27,7 +28,11 @@ def test_carla_sequence_dataset_shapes(tmp_path):
         f.create_dataset("proprio", data=np.zeros((frames, 3), dtype=np.float32))
         f.create_dataset("ep_idx", data=np.zeros(frames, dtype=np.int32))
         f.create_dataset("step_idx", data=np.arange(frames, dtype=np.int32))
+        f.create_dataset("route_id", data=np.full(frames, 10, dtype=np.int32))
     ds = CarlaSequenceDataset(path, frameskip=2, history_size=3, num_preds=1, image_size=32)
     item = ds[0]
     assert item["pixels"].shape == (4, 3, 32, 32)
     assert item["action"].shape == (4, 6)
+    assert item["route_id"].shape == (4, 1)
+    assert item["route_id"].dtype == torch.long
+    assert item["route_id"].squeeze(-1).tolist() == [10, 10, 10, 10]

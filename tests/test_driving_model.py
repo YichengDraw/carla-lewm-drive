@@ -142,6 +142,52 @@ def test_no_aux_config_disables_aux_head_and_aux_losses(monkeypatch):
         model.rollout_aux(batch["pixels"], batch["action"])
 
 
+def test_route_conditioning_is_optional_and_requires_route_ids(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            values = torch.arange(batch * 8, dtype=pixels.dtype, device=pixels.device).reshape(batch, 2, 4)
+            return SimpleNamespace(last_hidden_state=values)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    cfg = DrivingLeWMConfig(
+        image_size=8,
+        patch_size=4,
+        action_dim=3,
+        embed_dim=4,
+        history_size=2,
+        predictor_depth=1,
+        predictor_heads=1,
+        predictor_mlp_dim=8,
+        use_aux_head=False,
+        aux_weight=0.0,
+        action_weight=1.0,
+        pred_action_weight=0.0,
+        route_vocab_size=16,
+    )
+    model = DrivingLeWM(cfg)
+    pixels = torch.zeros(1, 2, 3, 8, 8)
+    action = torch.zeros(1, 2, 3)
+    batch = {
+        **batch_with_progress([0.0, 1.0]),
+        "pixels": pixels,
+        "action": action,
+        "route_id": torch.full((1, 2, 1), 10, dtype=torch.long),
+    }
+
+    out = model.forward(batch)
+    policy = model.policy_action(pixels, route_id=10)
+
+    assert out["action"].shape == (1, 2, 3)
+    assert policy.shape == (1, 3)
+    with pytest.raises(ValueError, match="route_id is required"):
+        model.policy_action(pixels)
+
+
 def test_pred_weight_can_disable_latent_prediction_loss(monkeypatch):
     class DummyEncoder(nn.Module):
         def __init__(self) -> None:

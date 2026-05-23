@@ -39,6 +39,8 @@ class DrivingLeWMConfig:
     action_conflict_weight: float = 0.0
     pred_action_conflict_weight: float = 1.0
     progress_mode: str = "absolute"
+    route_vocab_size: int = 0
+    route_embed_scale: float = 1.0
 
 
 class ActionEmbedder(nn.Module):
@@ -102,6 +104,7 @@ class DrivingLeWM(nn.Module):
             nn.Linear(cfg.predictor_mlp_dim, cfg.embed_dim),
         )
         self.action_encoder = ActionEmbedder(cfg.action_dim, cfg.embed_dim)
+        self.route_embed = nn.Embedding(cfg.route_vocab_size, cfg.embed_dim) if cfg.route_vocab_size > 0 else None
         self.predictor = ARPredictor(
             history_size=cfg.history_size,
             embed_dim=cfg.embed_dim,
@@ -149,8 +152,37 @@ class DrivingLeWM(nn.Module):
         emb = self.projector(cls)
         return emb.reshape(b, t, -1)
 
+    def apply_route_condition(self, emb: torch.Tensor, route_id: torch.Tensor | int | None) -> torch.Tensor:
+        if self.route_embed is None:
+            return emb
+        if route_id is None:
+            raise ValueError("route_id is required when route_vocab_size > 0")
+        b, t = emb.shape[:2]
+        ids = route_id if torch.is_tensor(route_id) else torch.as_tensor(route_id, device=emb.device)
+        ids = ids.to(device=emb.device)
+        if ids.ndim == 0:
+            ids = ids.reshape(1, 1).expand(b, t)
+        elif ids.ndim == 1:
+            if ids.shape[0] == b:
+                ids = ids[:, None].expand(b, t)
+            elif ids.shape[0] == t:
+                ids = ids[None, :].expand(b, t)
+            else:
+                raise ValueError(f"route_id length {ids.shape[0]} does not match batch={b} or time={t}")
+        elif ids.ndim == 2:
+            if ids.shape != (b, t):
+                raise ValueError(f"route_id shape {tuple(ids.shape)} does not match {(b, t)}")
+        elif ids.ndim == 3 and ids.shape[-1] == 1:
+            ids = ids.squeeze(-1)
+            if ids.shape != (b, t):
+                raise ValueError(f"route_id shape {tuple(ids.shape)} does not match {(b, t)}")
+        else:
+            raise ValueError(f"route_id must be scalar, [B], [T], [B,T], or [B,T,1], got {tuple(ids.shape)}")
+        ids = ids.long().clamp(0, int(self.cfg.route_vocab_size) - 1)
+        return emb + float(self.cfg.route_embed_scale) * self.route_embed(ids)
+
     def forward(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        emb = self.encode_pixels(batch["pixels"])
+        emb = self.apply_route_condition(self.encode_pixels(batch["pixels"]), batch.get("route_id"))
         act_emb = self.action_encoder(batch["action"])
         ctx = emb[:, : self.cfg.history_size]
         ctx_act = act_emb[:, : self.cfg.history_size]
@@ -315,11 +347,16 @@ class DrivingLeWM(nn.Module):
         }
 
     @torch.no_grad()
-    def rollout_aux(self, pixels: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    def rollout_aux(
+        self,
+        pixels: torch.Tensor,
+        actions: torch.Tensor,
+        route_id: torch.Tensor | int | None = None,
+    ) -> torch.Tensor:
         if self.aux_head is None:
             raise RuntimeError("rollout_aux requires use_aux_head=true; use policy_action for no-aux action models")
         self.eval()
-        emb = self.encode_pixels(pixels)
+        emb = self.apply_route_condition(self.encode_pixels(pixels), route_id)
         act_emb = self.action_encoder(actions)
         ctx = emb[:, -self.cfg.history_size :]
         ctx_act = act_emb[:, -self.cfg.history_size :]
@@ -327,7 +364,7 @@ class DrivingLeWM(nn.Module):
         return self.aux_head(pred).squeeze(1)
 
     @torch.no_grad()
-    def policy_action(self, pixels: torch.Tensor) -> torch.Tensor:
+    def policy_action(self, pixels: torch.Tensor, route_id: torch.Tensor | int | None = None) -> torch.Tensor:
         self.eval()
-        emb = self.encode_pixels(pixels)
+        emb = self.apply_route_condition(self.encode_pixels(pixels), route_id)
         return self.action_head(emb[:, -1])

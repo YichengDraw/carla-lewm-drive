@@ -105,6 +105,14 @@ class CarlaSequenceDataset(Dataset):
             return torch.from_numpy(data)
         return torch.zeros((len(indices), dim), dtype=torch.float32)
 
+    def _load_optional_int(self, h5: h5py.File, key: str, indices: np.ndarray, dim: int = 1) -> torch.Tensor:
+        if key in h5:
+            data = np.asarray(h5[key][indices], dtype=np.int64)
+            if data.ndim == 1 and dim == 1:
+                data = data[:, None]
+            return torch.from_numpy(data)
+        return torch.zeros((len(indices), dim), dtype=torch.long)
+
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         h5 = self._open()
         ep, start = self.clip_indices[idx]
@@ -130,6 +138,7 @@ class CarlaSequenceDataset(Dataset):
             "offroad": self._load_optional(h5, "offroad", frame_indices),
             "red_light": self._load_optional(h5, "red_light", frame_indices),
             "blocked": self._load_optional(h5, "blocked", frame_indices),
+            "route_id": self._load_optional_int(h5, "route_id", frame_indices),
         }
         return {
             "pixels": pixels,

@@ -154,7 +154,14 @@ class CEMPlanner:
         self.rng = np.random.default_rng(int(cfg.get("seed", 0)))
         self.target_speed_mps = float(cfg.get("target_speed_mps", 20.0 / 3.6))
 
-    def propose(self, model: DrivingLeWM, pixels: torch.Tensor, history_actions: torch.Tensor, device: torch.device) -> np.ndarray:
+    def propose(
+        self,
+        model: DrivingLeWM,
+        pixels: torch.Tensor,
+        history_actions: torch.Tensor,
+        device: torch.device,
+        route_id: int | None = None,
+    ) -> np.ndarray:
         horizon = int(self.cfg["horizon"])
         num_samples = int(self.cfg["num_samples"])
         iterations = int(self.cfg["iterations"])
@@ -168,7 +175,7 @@ class CEMPlanner:
             samples = self.rng.normal(mean, std, size=(num_samples, horizon, 3)).astype(np.float32)
             samples = np.clip(samples, self.low.reshape(1, 1, 3), self.high.reshape(1, 1, 3))
             samples = self._sanitize_samples(samples)
-            scores = self.score_samples(model, pixels, history_actions, samples, device)
+            scores = self.score_samples(model, pixels, history_actions, samples, device, route_id=route_id)
             elite_idx = np.argsort(scores)[:elite]
             elite_samples = samples[elite_idx]
             mean = elite_samples.mean(axis=0)
@@ -193,6 +200,7 @@ class CEMPlanner:
         history_actions: torch.Tensor,
         samples: np.ndarray,
         device: torch.device,
+        route_id: int | None = None,
     ) -> np.ndarray:
         if history_actions.ndim != 3:
             raise ValueError(f"Expected history_actions as [B,T,A], got shape {tuple(history_actions.shape)}")
@@ -210,7 +218,10 @@ class CEMPlanner:
             candidate_history = history_device.clone()
             first_action = torch.from_numpy(expand_action_to_model_dim(actions[0], model_action_dim)).to(device)
             candidate_history[:, -1, :] = first_action
-            aux = model.rollout_aux(pixels_device, candidate_history).detach().cpu().numpy()[0]
+            if route_id is None:
+                aux = model.rollout_aux(pixels_device, candidate_history).detach().cpu().numpy()[0]
+            else:
+                aux = model.rollout_aux(pixels_device, candidate_history, route_id=route_id).detach().cpu().numpy()[0]
             speed, progress, lane_offset, heading, collision, offroad, red_light, blocked = aux.tolist()
             speed_error = abs(float(speed) - self.target_speed_mps)
             action_smooth = float(np.square(np.diff(actions, axis=0)).mean()) if len(actions) > 1 else 0.0
@@ -308,6 +319,8 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
         action_conflict_weight=float(model_cfg.get("action_conflict_weight", 0.0)),
         pred_action_conflict_weight=float(model_cfg.get("pred_action_conflict_weight", 1.0)),
         progress_mode=str(model_cfg.get("progress_mode", "absolute")),
+        route_vocab_size=int(model_cfg.get("route_vocab_size", 0)),
+        route_embed_scale=float(model_cfg.get("route_embed_scale", 1.0)),
     )
     model = DrivingLeWM(lewm_cfg)
     try:
@@ -736,7 +749,7 @@ def run_episode(
                 pixels = preprocess_pixels(image_history[-int(model.cfg.history_size) :], int(model.cfg.image_size), device)
                 hist = np.stack(action_history[-int(model.cfg.history_size) :], axis=0)
                 history_actions = torch.from_numpy(hist).unsqueeze(0).float()
-                action = planner.propose(model, pixels, history_actions, device)
+                action = planner.propose(model, pixels, history_actions, device, route_id=int(spawn_index))
                 if policy == "model_lane_keep":
                     action = maybe_govern_model_speed(
                         action,
@@ -752,7 +765,7 @@ def run_episode(
                 if bool(getattr(model, "_checkpoint_missing_action_head", False)):
                     raise ValueError("Action policy requires a checkpoint trained with action_head weights")
                 pixels = preprocess_pixels(image_history[-int(model.cfg.history_size) :], int(model.cfg.image_size), device)
-                action_flat = model.policy_action(pixels).detach().cpu().numpy()[0]
+                action_flat = model.policy_action(pixels, route_id=int(spawn_index)).detach().cpu().numpy()[0]
                 block = flatten_model_action_to_block(action_flat, int(model.cfg.action_dim))
                 if policy == "model_action_lane_keep":
                     steer = lane_keep_steer(pre_lane_offset, pre_heading_error, eval_cfg)
