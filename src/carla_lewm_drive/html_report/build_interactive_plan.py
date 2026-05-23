@@ -198,7 +198,7 @@ HTML = r"""<!doctype html>
         <h2>实验矩阵</h2>
         <table>
           <tr><th>顺序</th><th>工件</th><th>目标</th><th>状态</th></tr>
-          <tr><td>1</td><td><code>configs/d1_city_free_drive.yaml</code></td><td>采集 120 episodes / 6 routes / no traffic / green lights。</td><td><span class="tag good">ready</span></td></tr>
+          <tr><td>1</td><td><code>configs/d1_city_free_drive.yaml</code></td><td>pilot 采集 60 episodes x 40s / 6 routes / no traffic / green lights，约 48k frames。</td><td><span class="tag good">ready</span></td></tr>
           <tr><td>2</td><td><code>outputs/qc_d1_city_free_drive</code></td><td>逐帧 QC + contact sheet 人工检查。</td><td><span class="tag warn">run next</span></td></tr>
           <tr><td>3</td><td><code>train_d1_tiny_core_action_noaux_20k.yaml</code></td><td>主 baseline：no-aux tiny action policy。</td><td><span class="tag good">ready</span></td></tr>
           <tr><td>4</td><td><code>eval_d1_city_free_drive_model_action.yaml</code></td><td>D1-A 500m 安全距离评估。</td><td><span class="tag good">ready</span></td></tr>

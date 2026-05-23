@@ -127,7 +127,7 @@ carla-lewm-train --config configs/train_tiny_action_prior_10k.yaml \
   --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
 ```
 
-Next D1 no-traffic city free-drive run:
+Next D1 no-traffic city free-drive pilot run:
 
 ```bash
 carla-lewm-collect --config configs/d1_city_free_drive.yaml

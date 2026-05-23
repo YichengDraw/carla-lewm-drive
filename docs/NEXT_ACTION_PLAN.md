@@ -93,7 +93,7 @@ This keeps the LeWM argument clean: auxiliary losses are allowed to be useful en
 
 ## Dataset Plan
 
-Use `configs/d1_city_free_drive.yaml`.
+Use `configs/d1_city_free_drive.yaml`. The pilot scale is `60` episodes x `40s`, about `48k` frames, matching the accepted D0-train size. Scale to `120` episodes x `50s` only after the pilot passes QC and remote disk has enough headroom.
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.carla_collect.collect_dataset \
@@ -117,6 +117,7 @@ Frame-level acceptance:
 - off-road fraction `<= 0.005`.
 - red-light fraction `0` for D1-A.
 - blocked fraction `<= 0.05`.
+- minimum episode progress `170m`.
 - sampled contact sheet inspected before training.
 - six route IDs represented; if a spawn index repeatedly fails QC, drop it and document the replacement.
 
