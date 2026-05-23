@@ -154,7 +154,7 @@
       <section id="aux" data-kind="train">
         <h2>Aux 决策</h2>
         <div class="grid">
-          <div class="callout ok"><strong>主 baseline</strong><br><code>pred_loss + sigreg + action BC</code>。这保留 LeWM latent prediction 的核心，把 <code>aux</code> 和 <code>pred_aux</code> 设为 0。</div>
+          <div class="callout ok"><strong>主 baseline</strong><br><code>pred_loss + sigreg + action BC</code>。这保留 LeWM latent prediction 的核心，配置中 <code>use_aux_head: false</code>，不实例化也不计算 <code>aux</code>/<code>pred_aux</code>。</div>
           <div class="callout"><strong>消融 baseline</strong><br><code>pred_loss + sigreg + action BC + aux + pred_aux</code>。只有闭环指标赢，才把它作为驾驶 adapter 报告。</div>
         </div>
         <p>判断：你对 aux 的质疑是成立的。V-JEPA/LeWM 这条线强调少监督和 latent dynamics，额外往 latent 上读车辆状态会把故事变成工程增强。下一组先跑 no-aux，aux 只作为对照。</p>
@@ -204,7 +204,7 @@
           <tr><td><code>h3</code></td><td>输入 3 个历史视觉状态。</td></tr>
           <tr><td><code>fs5</code></td><td>CARLA 20Hz 控制每 5 帧合并，模型步长约 0.25s。</td></tr>
           <tr><td><code>core_action</code></td><td>latent prediction + SIGReg + action behavior cloning。</td></tr>
-          <tr><td><code>noaux</code></td><td><code>aux_weight: 0.0</code>，不把车辆状态回归作为主损失。</td></tr>
+          <tr><td><code>noaux</code></td><td><code>use_aux_head: false</code>，不把车辆状态回归头放进主模型。</td></tr>
           <tr><td><code>aux_ablation</code></td><td>同配置加回 <code>aux</code> 和 <code>pred_aux</code>，只用于对照。</td></tr>
           <tr><td><code>20k</code></td><td>20,000 optimizer steps，上限明显高于旧的几百 step 观察窗口。</td></tr>
         </table>

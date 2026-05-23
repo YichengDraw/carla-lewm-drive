@@ -27,6 +27,7 @@ class DrivingLeWMConfig:
     predictor_mlp_dim: int = 768
     dropout: float = 0.1
     sigreg_weight: float = 0.09
+    use_aux_head: bool = True
     aux_weight: float = 0.2
     pred_aux_weight: float = 1.0
     action_weight: float = 0.0
@@ -105,11 +106,15 @@ class DrivingLeWM(nn.Module):
             mlp_dim=cfg.predictor_mlp_dim,
             dropout=cfg.dropout,
         )
-        self.aux_head = nn.Sequential(
-            nn.LayerNorm(cfg.embed_dim),
-            nn.Linear(cfg.embed_dim, cfg.embed_dim),
-            nn.GELU(),
-            nn.Linear(cfg.embed_dim, 8),
+        self.aux_head = (
+            nn.Sequential(
+                nn.LayerNorm(cfg.embed_dim),
+                nn.Linear(cfg.embed_dim, cfg.embed_dim),
+                nn.GELU(),
+                nn.Linear(cfg.embed_dim, 8),
+            )
+            if cfg.use_aux_head
+            else None
         )
         self.action_head = nn.Sequential(
             nn.LayerNorm(cfg.embed_dim),
@@ -148,19 +153,19 @@ class DrivingLeWM(nn.Module):
         pred = self.predictor(ctx, ctx_act)
         target = emb[:, 1 : self.cfg.history_size + 1].detach()
         pred = pred[:, : target.shape[1]]
-        aux = self.aux_head(emb)
-        pred_aux = self.aux_head(pred)
         action = self.action_head(emb)
         pred_action = self.action_head(pred)
-        return {
+        out = {
             "emb": emb,
             "pred_emb": pred,
             "target_emb": target,
-            "aux": aux,
-            "pred_aux": pred_aux,
             "action": action,
             "pred_action": pred_action,
         }
+        if self.aux_head is not None:
+            out["aux"] = self.aux_head(emb)
+            out["pred_aux"] = self.aux_head(pred)
+        return out
 
     @staticmethod
     def sigreg_loss(emb: torch.Tensor) -> torch.Tensor:
@@ -210,11 +215,16 @@ class DrivingLeWM(nn.Module):
         pred_loss = F.mse_loss(out["pred_emb"], out["target_emb"])
         sigreg = self.sigreg_loss(out["emb"])
 
-        aux_target = self.aux_target(batch, self.cfg.progress_mode)
-        pred_aux_target = aux_target[:, 1 : self.cfg.history_size + 1].detach()
-        aux_loss = F.smooth_l1_loss(out["aux"], aux_target)
-        pred_aux_loss = F.smooth_l1_loss(out["pred_aux"], pred_aux_target)
-        aux_total = aux_loss + self.cfg.pred_aux_weight * pred_aux_loss
+        zero = pred_loss.new_zeros(())
+        aux_loss = zero
+        pred_aux_loss = zero
+        aux_total = zero
+        if self.aux_head is not None:
+            aux_target = self.aux_target(batch, self.cfg.progress_mode)
+            pred_aux_target = aux_target[:, 1 : self.cfg.history_size + 1].detach()
+            aux_loss = F.smooth_l1_loss(out["aux"], aux_target)
+            pred_aux_loss = F.smooth_l1_loss(out["pred_aux"], pred_aux_target)
+            aux_total = aux_loss + self.cfg.pred_aux_weight * pred_aux_loss
 
         action_target = batch["action"].float()
         pred_action_target = action_target[:, 1 : self.cfg.history_size + 1].detach()
@@ -248,6 +258,8 @@ class DrivingLeWM(nn.Module):
 
     @torch.no_grad()
     def rollout_aux(self, pixels: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+        if self.aux_head is None:
+            raise RuntimeError("rollout_aux requires use_aux_head=true; use policy_action for no-aux action models")
         self.eval()
         emb = self.encode_pixels(pixels)
         act_emb = self.action_encoder(actions)

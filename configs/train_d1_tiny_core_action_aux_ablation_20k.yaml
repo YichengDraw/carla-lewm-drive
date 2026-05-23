@@ -23,6 +23,7 @@ model:
   predictor_mlp_dim: 768
   dropout: 0.1
   sigreg_weight: 0.09
+  use_aux_head: true
   aux_weight: 0.2
   pred_aux_weight: 1.0
   action_weight: 0.5

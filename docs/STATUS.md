@@ -104,5 +104,5 @@ The active next gate is D1 no-traffic city free-drive:
 1. Collect `D1-city-free-drive-no-traffic` with six fixed Town03 spawn indices, no vehicles, no walkers, clear weather, and green lights for the first pass.
 2. Evaluate by distance before primary road-safety failures: collision, off-road / roadside departure, or blocked.
 3. Add real traffic lights as D1-B after D1-A is stable; keep speed-limit violations as logged soft penalties during the first D1 attempt.
-4. Train the next tiny baseline with `pred_loss + sigreg + action BC`, setting `aux_weight: 0.0` and `pred_aux_weight: 0.0`.
+4. Train the next tiny baseline with `pred_loss + sigreg + action BC`, setting `use_aux_head: false` so the auxiliary heads are absent from the main baseline.
 5. Run the `aux + pred_aux` version only as an ablation and report it as an engineering adapter if it wins closed-loop.

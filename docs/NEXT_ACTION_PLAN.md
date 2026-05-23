@@ -76,6 +76,7 @@ pred_loss + sigreg + action BC
 ```
 
 That is not a pure original LeWM objective because the action head is needed for direct closed-loop control, but it removes the disputed `aux` and `pred_aux` supervision from the representation objective.
+The main no-aux config uses `use_aux_head: false`, so the auxiliary heads are absent rather than merely zero-weighted.
 
 We keep the auxiliary version only as an ablation:
 
