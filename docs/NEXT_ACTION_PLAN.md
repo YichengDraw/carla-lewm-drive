@@ -1,6 +1,6 @@
 # Next Execution Plan: D1 No-Traffic City Free-Drive
 
-Last updated: 2026-05-23 Asia/Shanghai.
+Last updated: 2026-05-23 19:26 Asia/Shanghai.
 
 ## Current Interpretation
 
@@ -21,6 +21,8 @@ Tertiary penalty: speed-limit violation.
 ```
 
 Speed remains logged and penalized, but the main score is safety-distance before the first primary road-safety failure.
+
+The first D1-A no-aux tiny run has now answered the smallest-scope question negatively. After fixing evaluator policy resolution so `--checkpoint` no longer overwrites `policy: model_action`, the total-best checkpoint reached mean Safety IFD `23.19m`, and the action-best checkpoint reached `29.77m`. Both failed off-road on all 6 routes. Contact sheets and action traces show near-constant throttle plus a small steering bias, not active lane correction. This is below the threshold for D1-W weather mixing or ViT small.
 
 ## Task Definition
 
@@ -60,7 +62,7 @@ Run this only after D1-A has a credible closed-loop result. The first weather-mi
 - Scale: start with the same total frame budget as D1-A by splitting episodes across weather presets; expand only if QC and closed-loop results justify it.
 - Evaluation: report per-weather Safety IFD, not only aggregate mean. A model that succeeds only in one weather is not robust.
 
-If D1-W succeeds, then add D1-B real lights on the successful weather distribution. If D1-W fails while D1-A succeeds, prioritize data diversity and augmentation before increasing model size.
+Current gate status: paused. If D1-W succeeds, then add D1-B real lights on the successful weather distribution. If D1-W fails while D1-A succeeds, prioritize data diversity and augmentation before increasing model size.
 
 ### Later D2
 
@@ -104,7 +106,7 @@ Interpretation rule:
 
 - If no-aux wins or ties, the project claim should prefer the simpler objective.
 - If aux wins, present it as an empirical driving adapter, not as original LeWM.
-- If both fail, the next fix should target task conditioning / route commands / data coverage before scaling ViT.
+- If both fail, the next fix should target task conditioning / route commands / data coverage before scaling ViT. The current no-aux result has already triggered this rule for the main branch.
 
 This keeps the LeWM argument clean: auxiliary losses are allowed to be useful engineering, but they must earn their place.
 
@@ -155,7 +157,7 @@ PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
 
 ### Ablation: Tiny Core Action + Aux
 
-Run only after the no-aux baseline has a closed-loop result.
+Run only after the no-aux baseline has a closed-loop result and the pure-action failure mode has been diagnosed.
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
@@ -185,17 +187,27 @@ Run ViT small only after the task has earned it:
 - If tiny D1-A is stable and D1-W exposes visual robustness failures, try weather-mix data first, then ViT small.
 - If tiny D1-A and D1-W are both stable but the control remains visibly underfit or offline action loss plateaus high, run ViT small with the same no-aux objective and the same D1-A/D1-W eval suite.
 
+Current gate status: paused. The observed D1-A failure is before `50m` and looks like action decoding / closed-loop correction failure, so increasing ViT size is not the next experiment.
+
 ## Evaluation Plan
 
 Run D1-A first:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --policy model_action \
   --config configs/eval_d1_city_free_drive_model_action.yaml \
   --output-dir outputs/d1_eval_tiny_core_action_noaux_model_action_500m
 ```
 
 For the action-policy D1-A gate, evaluate both the total-validation best checkpoint and a best-action checkpoint when available. The closed-loop policy calls `policy_action(...)`, so `val/action_loss` is a useful secondary checkpoint selector even when total validation loss is dominated by latent/SIGReg terms.
+
+Latest D1-A evidence:
+
+| Checkpoint | Output dir | Mean Safety IFD | Primary success | Failure |
+|---|---|---:|---:|---|
+| total-best epoch 40 / step 5840 | `outputs/d1_eval_tiny_core_action_noaux_model_action_total_policyfix_500m` | `23.19m` | `0/6` | off-road on 6/6 |
+| action-best epoch 52 / step 7592 | `outputs/d1_eval_tiny_core_action_noaux_model_action_best_action_policyfix_500m` | `29.77m` | `0/6` | off-road on 6/6 |
 
 Then run D1-B only if D1-A has no primary safety failures:
 
@@ -223,6 +235,8 @@ Continue from D1-A to D1-W if:
 - at least several routes survive long enough to show turns and lane keeping, not only straight-road behavior;
 - total-best and action-best checkpoints agree qualitatively, or the action-best clearly wins closed-loop.
 
+Current decision: do not continue to D1-W. Action-best is only modestly better than total-best and both fail off-road on every route.
+
 Pause if:
 
 - route selection produces many QC rejections;
@@ -237,14 +251,18 @@ Stop this branch if:
 - CARLA timing guard reports external ticking;
 - the model cannot move beyond the D0 boundary after the task and metric are simplified.
 
+Current decision: pause the no-aux tiny branch before weather/scale. The aux branch has not been run, but the clean main baseline is below `50m`, so the next work item is diagnosis rather than another larger training job.
+
 ## If D1 Still Fails
 
-The next likely fixes are task-conditioning and data, not model size:
+The current D1-A result has entered this section. The next likely fixes are task-conditioning and data, not model size:
 
-1. Add route-command labels such as `follow_lane`, `left`, `right`, `straight`.
-2. Add recovery data for small lane-offset and heading-error perturbations.
-3. Split lateral and longitudinal heads so steering can be judged independently from throttle.
-4. Add commanded lane-change episodes after route commands work on fixed turns.
-5. Add sparse red-light examples only after D1-A is stable.
-6. Add multi-weather data only after the single-weather task has a real closed-loop signal.
-7. Try ViT small only after the above checks show tiny is under-capacity.
+1. Compare expert actions and predicted actions route by route, especially steering mean, sign, variance, and lane-offset correlation.
+2. Train or evaluate a simple behavior-cloning policy on the same images/actions. If it also drifts off-road, the dataset or task interface is insufficient for closed-loop driving.
+3. Add recovery data for small lane-offset and heading-error perturbations.
+4. Add route-command labels such as `follow_lane`, `left`, `right`, `straight` so turns and lane choices are explicit.
+5. Split lateral and longitudinal heads so steering can be judged independently from throttle.
+6. Add commanded lane-change episodes after route commands work on fixed turns.
+7. Add sparse red-light examples only after D1-A is stable.
+8. Add multi-weather data only after the single-weather task has a real closed-loop signal.
+9. Try ViT small only after the above checks show tiny is under-capacity.

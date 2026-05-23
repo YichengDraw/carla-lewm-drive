@@ -1,6 +1,6 @@
 # Current Execution Status
 
-Last checked: 2026-05-23 Asia/Shanghai.
+Last checked: 2026-05-23 19:26 Asia/Shanghai.
 
 ## Verdict
 
@@ -12,7 +12,9 @@ The first 200m pass is a governed hybrid sanity result: tiny LeWM stays in the l
 
 The action-prior branch has now run for 10,000 optimizer steps. It improved offline action prediction, but closed-loop control still needs action decoding constraints: raw action policy was blocked at about 0.003m, throttle/brake exclusivity lifted pure action to 24.84m before speed violation, and action+lane-keep reached 157.69m before blocked. With throttle/brake exclusivity plus speed-governor brake release, action+lane-keep passed the 200m speed-gated route. This is a governed hybrid success, and the next gate is now a clearer D1 city free-drive task where road safety distance is primary and speed is tertiary.
 
-D1 is now active. The first D1 dataset has `48,000` frames across `60` episodes and six Town03 spawn routes, strict QC passed with zero collision/off-road/red-light/blocked frames, and the sampled contact sheet was inspected before training. The active main training run is `d1_tiny_h3_fs5_core_action_noaux_20k` with `use_aux_head: false`; at the latest check it had reached step `8400`, kept `aux_loss=0` and `pred_aux_loss=0`, and total-validation best was `0.13641` at epoch `40` / step `5840`. Because D1-A uses `policy_action(...)`, a `best_action.pt` checkpoint is also maintained; current action-best is epoch `52` / step `7592` with `val/action_loss=0.002903`. Remote `d1_best_action_watch` and `d1_auto_eval_noaux` tmux watchers are armed; after training exits they will run D1-A on both total-best and action-best checkpoints.
+D1-A no-aux tiny has now completed and did not pass the small-scope gate. The dataset quality was good: `48,000` frames across `60` episodes and six Town03 spawn routes, strict QC passed with zero collision/off-road/red-light/blocked frames, and sampled contact sheets were inspected before training. The run `d1_tiny_h3_fs5_core_action_noaux_20k` used `use_aux_head: false` with `aux_loss=0` and `pred_aux_loss=0`; training stopped by early stop after epoch `60` / step `8760`. Total-validation best was epoch `40` / step `5840` with `val/loss=0.13641`; action-best was epoch `52` / step `7592` with `val/action_loss=0.002903`.
+
+Closed-loop D1-A failed on both checkpoints after fixing the evaluator policy override. Total-best reached mean Safety IFD `23.19m`; action-best reached `29.77m`; both had `0/6` primary-safety-success and `6/6` off-road failures. Contact sheets were copied to `outputs_d1_eval_total_policyfix_contact_sheet.jpg` and `outputs_d1_eval_best_action_policyfix_contact_sheet.jpg`. Contact sheets and action traces show a consistent learned-control issue: the model outputs near-constant throttle with a small left steering bias, lane offset drifts toward about `+-1.8m`, and the vehicle leaves the road. This is not yet a weather-robustness or model-size question, so D1-W mixed weather and ViT small are paused.
 
 ## Repository And Environment
 
@@ -77,6 +79,8 @@ Batch/resource notes:
 | Action-prior `model_action` | 1 | 200m | isolated port 2100, throttle/brake exclusive | 24.84m | 10.56 | failed speed-limit |
 | Action-prior `model_action_lane_keep` | 1 | 200m | isolated port 2100, throttle/brake exclusive | 157.69m | 63.08 | failed blocked |
 | Action-prior `model_action_lane_keep` | 1 | 200m | isolated port 2100, exclusive + brake-release speed governor | 200.00m | 100.0 | governed hybrid pass |
+| D1 no-aux total-best `model_action` | 6 | 500m | isolated port 2100, no traffic, green lights | 23.19m | 3.25 | failed off-road on 6/6 routes |
+| D1 no-aux action-best `model_action` | 6 | 500m | isolated port 2100, no traffic, green lights | 29.77m | 4.17 | failed off-road on 6/6 routes |
 | Tiny checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 | Small checkpoint | 1 | 50m | port 2000, wider CEM | invalid | invalid | external HIL client ticked CARLA |
 
@@ -87,6 +91,7 @@ Interpretation:
 - The throttle-only target shows the model can sustain a simplified long-ish control loop up to 190m. The small ViT did not move the 200m boundary, and the steering-safe failures show that route-following still needs steering/lane-keeping calibration.
 - The speed-gated trace shows the fair metric matters: ungoverned model-lane-keep reaches only 24.17m before speed-limit violation, while governed hybrid reaches 200m with max speed `6.57m/s` and max lane offset `0.094m`.
 - The action-prior trace shows an action representation problem: the dataset has mutually exclusive throttle/brake, while the raw action head often predicts both. Evaluation-side exclusivity and speed-governor brake release can make the hybrid pass 200m, but pure action still fails speed compliance.
+- The D1 no-aux trace shows the stronger city free-drive task is not solved: action-best improves mean IFD by only `6.58m` over total-best, and all six routes still end in off-road. Mean steering is slightly negative on most routes, which produces slow lateral drift rather than closed-loop lane correction.
 
 ## Completed Code Work
 
@@ -97,16 +102,16 @@ Interpretation:
 - Added CARLA closed-loop evaluator for autopilot, constant-action, checkpoint, lane-keep, and model-lane-keep policies, including short-eval CLI overrides, action traces, lane/heading trace columns, speed-limit infractions, and CARLA timing guards.
 - Added optional action-prior supervision on latent states plus `model_action` and `model_action_lane_keep` policies.
 - Added throttle/brake exclusivity and speed-governor brake release options for action-policy closed-loop evaluation.
+- Fixed closed-loop policy resolution so `--checkpoint` no longer overrides a YAML `policy: model_action`; added regression tests and verified the remote target suite with `17 passed`.
 - Added tests for QC, training reliability, fast export, metrics, closed-loop evaluator, and delta-progress/predicted-aux targets.
 
 ## Current Next Gate
 
-The active next gate is D1 no-traffic city free-drive:
+The active next gate is D1 action-policy diagnosis, not weather or scale:
 
-1. Finish or stop-on-plateau `D1-city-free-drive-no-traffic` no-aux training with W&B and local CSV/checkpoints intact.
-2. Evaluate by distance before primary road-safety failures: collision, off-road / roadside departure, or blocked.
-3. If D1-A has a credible closed-loop signal, run a D1-W mixed-weather branch before adding vehicles: `ClearNoon`, `CloudyNoon`, `WetNoon`, and `SoftRainNoon`, still with no traffic and green lights.
-4. Add real traffic lights as D1-B after D1-A and the first weather robustness pass are understood; keep speed-limit violations as logged soft penalties during the first D1 attempt.
-5. Add commanded lane changes only after route-command labels exist; D1-A already covers natural left/right road geometry through turns and intersections.
-6. Run the `aux + pred_aux` version only as an ablation and report it as an engineering adapter if it wins closed-loop.
-7. Try ViT small only after tiny succeeds enough to show a capacity or visual-robustness limit; do not use model size to cover up a failed task definition or control interface.
+1. Compare expert action distribution against predicted action traces route by route, especially steering sign, mean, and variance.
+2. Train or evaluate a simple supervised behavior-cloning policy on the same D1 dataset as a control baseline; if BC fails similarly, the dataset/task interface is the bottleneck.
+3. Add recovery/perturbation data or route-command labels before another long LeWM run; current pure no-aux action decoding lacks lane-correction behavior.
+4. Keep D1-W mixed weather paused until D1-A has a real single-weather closed-loop signal.
+5. Keep ViT small paused until the failure looks like capacity or visual robustness rather than action decoding / task conditioning.
+6. Run `aux + pred_aux` only as an ablation after the action-policy baseline is diagnosed; if it wins, report it as an engineering adapter, not the clean LeWM story.
