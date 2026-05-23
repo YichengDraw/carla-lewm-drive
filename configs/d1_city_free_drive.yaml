@@ -4,7 +4,7 @@ scenario:
   carla_version: 0.9.16
   host: 127.0.0.1
   port: 2000
-  timeout_s: 10.0
+  timeout_s: 30.0
   town: Town03
   fixed_delta_seconds: 0.05
   synchronous_mode: true

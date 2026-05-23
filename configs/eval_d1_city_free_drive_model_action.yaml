@@ -6,7 +6,7 @@ eval:
   output_dir: outputs/d1_eval_tiny_core_action_noaux_model_action_500m
   host: 127.0.0.1
   port: 2100
-  timeout_s: 10.0
+  timeout_s: 30.0
   town: Town03
   load_world: true
   fixed_delta_seconds: 0.05
