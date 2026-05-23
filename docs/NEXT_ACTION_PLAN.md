@@ -172,6 +172,8 @@ PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --output-dir outputs/d1_eval_tiny_core_action_noaux_model_action_500m
 ```
 
+For the action-policy D1-A gate, evaluate both the total-validation best checkpoint and a best-action checkpoint when available. The closed-loop policy calls `policy_action(...)`, so `val/action_loss` is a useful secondary checkpoint selector even when total validation loss is dominated by latent/SIGReg terms.
+
 Then run D1-B only if D1-A has no primary safety failures:
 
 ```bash

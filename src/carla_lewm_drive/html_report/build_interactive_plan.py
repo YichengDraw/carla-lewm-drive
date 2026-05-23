@@ -134,10 +134,11 @@ HTML = r"""<!doctype html>
           <div class="metric"><span>Clean no-aux</span><strong>running</strong><span><code>use_aux_head: false</code>，aux/pred_aux 全程 0</span></div>
           <div class="metric"><span>Best val</span><strong>0.15595</strong><span>epoch 27 / step 3942，仍在训练</span></div>
           <div class="metric"><span>Monitor</span><strong>5min</strong><span><code>outputs/remote_logs/d1_noaux_watch.log</code></span></div>
-          <div class="metric"><span>Auto eval</span><strong>armed</strong><span><code>d1_auto_eval_noaux</code> 等训练结束后跑 D1-A</span></div>
+          <div class="metric"><span>Best action</span><strong>0.003431</strong><span>epoch 29 / step 4234，已保存 <code>best_action.pt</code></span></div>
+          <div class="metric"><span>Auto eval</span><strong>armed</strong><span>训练后评估 total-best 和 action-best</span></div>
         </div>
         <p>当前 W&B run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7"><code>d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7</code></a>。</p>
-        <div class="callout ok">截至 2026-05-23 15:01 Asia/Shanghai，训练进入 epoch 29；validation loss 已从 epoch 1 的 0.2819 改善到 epoch 27 / step 3942 的 0.15595，epoch 28 回落到 0.16829。aux/pred_aux 指标全程为 0，确认主 run 是真正 no-aux。<code>d1_auto_eval_noaux</code> 已挂起，会在训练 tmux 结束后启动 CARLA 2100 并运行 D1-A。</div>
+        <div class="callout ok">截至 2026-05-23 15:07 Asia/Shanghai，训练进入 epoch 30；validation loss 已从 epoch 1 的 0.2819 改善到 epoch 27 / step 3942 的 0.15595，epoch 29 的 <code>val/action_loss</code> 刷新到 0.003431。aux/pred_aux 指标全程为 0，确认主 run 是真正 no-aux。<code>d1_best_action_watch</code> 会继续保存 action-best；<code>d1_auto_eval_noaux</code> 会在训练 tmux 结束后启动 CARLA 2100，并分别运行 total-best 与 action-best 的 D1-A。</div>
       </section>
 
       <section id="task" data-kind="task">
