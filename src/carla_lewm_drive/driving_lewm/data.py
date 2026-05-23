@@ -3,12 +3,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import h5py
 import numpy as np
 import torch
-from torch.utils.data import Dataset, Subset
+from torch.utils.data import ConcatDataset, Dataset, Subset
 from torchvision.transforms import functional as TF
 
 
@@ -21,6 +21,11 @@ class EpisodeSplit:
     train_episodes: list[int]
     val_episodes: list[int]
     test_episodes: list[int]
+
+
+@dataclass(frozen=True)
+class MultiDatasetSplit:
+    datasets: list[dict[str, Any]]
 
 
 def split_episodes(
@@ -149,16 +154,7 @@ class CarlaSequenceDataset(Dataset):
         }
 
 
-def build_splits(dataset_path: str | Path, cfg: dict) -> tuple[Subset, Subset, Subset, EpisodeSplit]:
-    with h5py.File(dataset_path, "r") as f:
-        num_episodes = int(len(f["ep_len"]))
-    split = split_episodes(
-        num_episodes,
-        float(cfg["train_split"]),
-        float(cfg["val_split"]),
-        int(cfg["split_seed"]),
-    )
-
+def _make_single_splits(dataset_path: str | Path, cfg: dict, *, split_seed: int) -> tuple[Subset, Subset, Subset, EpisodeSplit]:
     common = {
         "dataset_path": dataset_path,
         "frameskip": int(cfg["frameskip"]),
@@ -166,7 +162,56 @@ def build_splits(dataset_path: str | Path, cfg: dict) -> tuple[Subset, Subset, S
         "num_preds": int(cfg["num_preds"]),
         "image_size": int(cfg["image_size"]),
     }
+    with h5py.File(dataset_path, "r") as f:
+        num_episodes = int(len(f["ep_len"]))
+    split = split_episodes(
+        num_episodes,
+        float(cfg["train_split"]),
+        float(cfg["val_split"]),
+        split_seed,
+    )
     train = CarlaSequenceDataset(**common, episodes=split.train_episodes)
     val = CarlaSequenceDataset(**common, episodes=split.val_episodes)
     test = CarlaSequenceDataset(**common, episodes=split.test_episodes)
     return train, val, test, split
+
+
+def build_splits(
+    dataset_path: str | Path | list[str] | list[Path],
+    cfg: dict,
+) -> tuple[Dataset, Dataset, Dataset, EpisodeSplit | MultiDatasetSplit]:
+    dataset_paths = list(dataset_path) if isinstance(dataset_path, list) else [dataset_path]
+    if not dataset_paths:
+        raise ValueError("At least one dataset path is required")
+    repeat_factors = list(cfg.get("dataset_repeat_factors", [1] * len(dataset_paths)))
+    if len(repeat_factors) != len(dataset_paths):
+        raise ValueError("data.dataset_repeat_factors must match data.dataset_paths")
+    repeat_factors = [max(1, int(x)) for x in repeat_factors]
+    base_seed = int(cfg["split_seed"])
+
+    train_sets: list[Dataset] = []
+    val_sets: list[Dataset] = []
+    test_sets: list[Dataset] = []
+    manifest: list[dict[str, Any]] = []
+    for idx, (path, repeat) in enumerate(zip(dataset_paths, repeat_factors, strict=True)):
+        train, val, test, split = _make_single_splits(path, cfg, split_seed=base_seed + idx)
+        train_sets.extend([train] * repeat)
+        val_sets.append(val)
+        test_sets.append(test)
+        manifest.append(
+            {
+                "dataset_path": str(path),
+                "train_repeat_factor": repeat,
+                "train_episodes": split.train_episodes,
+                "val_episodes": split.val_episodes,
+                "test_episodes": split.test_episodes,
+            }
+        )
+
+    if len(dataset_paths) == 1 and repeat_factors[0] == 1:
+        return train_sets[0], val_sets[0], test_sets[0], EpisodeSplit(
+            train_episodes=manifest[0]["train_episodes"],
+            val_episodes=manifest[0]["val_episodes"],
+            test_episodes=manifest[0]["test_episodes"],
+        )
+    return ConcatDataset(train_sets), ConcatDataset(val_sets), ConcatDataset(test_sets), MultiDatasetSplit(manifest)

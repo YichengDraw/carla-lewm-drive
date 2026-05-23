@@ -171,6 +171,14 @@ def make_model_cfg(cfg: dict[str, Any], action_dim: int) -> DrivingLeWMConfig:
     return DrivingLeWMConfig(**model)
 
 
+def configured_dataset_paths(data_cfg: dict[str, Any]) -> str | list[str] | None:
+    if data_cfg.get("dataset_paths") is not None:
+        return [str(path) for path in data_cfg["dataset_paths"]]
+    if data_cfg.get("dataset_path") is not None:
+        return str(data_cfg["dataset_path"])
+    return None
+
+
 def make_loader(dataset, cfg: dict[str, Any], *, shuffle: bool) -> DataLoader:
     trainer = cfg["trainer"]
     return DataLoader(
@@ -232,13 +240,14 @@ def run_batch_probe(cfg: dict[str, Any], train_set) -> list[dict[str, Any]]:
 
 
 def train(cfg: dict[str, Any], *, no_wandb: bool = False) -> Path:
-    if cfg["data"].get("dataset_path") is None:
-        raise ValueError("data.dataset_path is required")
+    dataset_paths = configured_dataset_paths(cfg["data"])
+    if dataset_paths is None:
+        raise ValueError("data.dataset_path or data.dataset_paths is required")
     seed_everything(int(cfg["run"]["seed"]))
     output_dir = Path(cfg["run"]["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    train_set, val_set, test_set, split = build_splits(cfg["data"]["dataset_path"], cfg["data"])
+    train_set, val_set, test_set, split = build_splits(dataset_paths, cfg["data"])
     (output_dir / "split_manifest.json").write_text(
         json.dumps(split.__dict__, indent=2, sort_keys=True),
         encoding="utf-8",
@@ -430,6 +439,8 @@ def main() -> None:
     cfg = load_yaml(args.config)
     if args.dataset_path is not None:
         cfg["data"]["dataset_path"] = str(args.dataset_path)
+        cfg["data"].pop("dataset_paths", None)
+        cfg["data"].pop("dataset_repeat_factors", None)
     if args.batch_size is not None:
         cfg["trainer"]["batch_size"] = int(args.batch_size)
     if args.num_workers is not None:
@@ -451,7 +462,10 @@ def main() -> None:
     if args.wandb_resume is not None:
         cfg.setdefault("wandb", {})["resume"] = args.wandb_resume
 
-    train_set, _, _, _ = build_splits(cfg["data"]["dataset_path"], cfg["data"])
+    dataset_paths = configured_dataset_paths(cfg["data"])
+    if dataset_paths is None:
+        raise ValueError("data.dataset_path or data.dataset_paths is required")
+    train_set, _, _, _ = build_splits(dataset_paths, cfg["data"])
     if args.batch_probe:
         out = Path(cfg["run"]["output_dir"]) / "batch_probe.json"
         out.parent.mkdir(parents=True, exist_ok=True)
