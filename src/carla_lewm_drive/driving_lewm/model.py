@@ -43,6 +43,8 @@ class DrivingLeWMConfig:
     route_embed_scale: float = 1.0
     use_temporal_action_head: bool = False
     temporal_action_include_history_actions: bool = True
+    temporal_action_history_noise_std: tuple[float, float, float] | None = None
+    temporal_action_history_noise_prob: float = 0.0
 
 
 class ActionEmbedder(nn.Module):
@@ -204,7 +206,22 @@ class DrivingLeWM(nn.Module):
                 raise ValueError(
                     f"Need at least {history_size} actions for temporal action head, got {action_history.shape[1]}"
                 )
-            features.append(action_history[:, -history_size:].float().reshape(action_history.shape[0], -1))
+            history = action_history[:, -history_size:].float()
+            if self.training and self.cfg.temporal_action_history_noise_std is not None:
+                if len(self.cfg.temporal_action_history_noise_std) != 3:
+                    raise ValueError("temporal_action_history_noise_std must contain throttle, steer, brake std")
+                prob = float(self.cfg.temporal_action_history_noise_prob)
+                if prob > 0.0:
+                    block = history.reshape(*history.shape[:-1], -1, 3)
+                    std = history.new_tensor(self.cfg.temporal_action_history_noise_std).reshape(
+                        *([1] * (block.ndim - 1)), 3
+                    )
+                    mask = (torch.rand(*block.shape[:-1], 1, device=block.device) < prob).to(block.dtype)
+                    block = block + torch.randn_like(block) * std * mask
+                    low = history.new_tensor([0.0, -1.0, 0.0]).reshape(*([1] * (block.ndim - 1)), 3)
+                    high = history.new_tensor([1.0, 1.0, 1.0]).reshape(*([1] * (block.ndim - 1)), 3)
+                    history = torch.clamp(block, low, high).reshape_as(history)
+            features.append(history.reshape(history.shape[0], -1))
         return torch.cat(features, dim=-1)
 
     def action_predictions(

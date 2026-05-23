@@ -325,6 +325,12 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
         temporal_action_include_history_actions=bool(
             model_cfg.get("temporal_action_include_history_actions", True)
         ),
+        temporal_action_history_noise_std=(
+            tuple(float(x) for x in model_cfg["temporal_action_history_noise_std"])
+            if model_cfg.get("temporal_action_history_noise_std") is not None
+            else None
+        ),
+        temporal_action_history_noise_prob=float(model_cfg.get("temporal_action_history_noise_prob", 0.0)),
     )
     model = DrivingLeWM(lewm_cfg)
     try:

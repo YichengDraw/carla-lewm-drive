@@ -346,6 +346,8 @@ def test_load_model_preserves_temporal_action_head_config(tmp_path, monkeypatch)
             "pred_action_weight": 0.0,
             "use_temporal_action_head": True,
             "temporal_action_include_history_actions": True,
+            "temporal_action_history_noise_std": [0.03, 0.06, 0.02],
+            "temporal_action_history_noise_prob": 0.5,
         },
     }
     model = DrivingLeWM(
@@ -366,6 +368,8 @@ def test_load_model_preserves_temporal_action_head_config(tmp_path, monkeypatch)
             pred_action_weight=0.0,
             use_temporal_action_head=True,
             temporal_action_include_history_actions=True,
+            temporal_action_history_noise_std=(0.03, 0.06, 0.02),
+            temporal_action_history_noise_prob=0.5,
         )
     )
     checkpoint = tmp_path / "temporal.pt"
@@ -374,6 +378,8 @@ def test_load_model_preserves_temporal_action_head_config(tmp_path, monkeypatch)
     loaded = load_model(checkpoint)
 
     assert loaded.cfg.use_temporal_action_head is True
+    assert loaded.cfg.temporal_action_history_noise_std == pytest.approx((0.03, 0.06, 0.02))
+    assert loaded.cfg.temporal_action_history_noise_prob == pytest.approx(0.5)
     assert loaded.action_head[0].normalized_shape == (21,)
 
 
