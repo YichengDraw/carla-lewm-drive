@@ -269,6 +269,8 @@ def run_collection(cfg: dict[str, Any]) -> Path:
         )
     }
     global_step = 0
+    recorder_started = False
+    collection_complete = False
     try:
         settings = world.get_settings()
         settings.synchronous_mode = bool(scenario["synchronous_mode"])
@@ -277,7 +279,9 @@ def run_collection(cfg: dict[str, Any]) -> Path:
         traffic_manager.set_synchronous_mode(True)
         traffic_manager.set_random_device_seed(int(scenario["traffic_manager_seed"]))
         simplify_traffic_lights(carla, world, scenario)
-        client.start_recorder(str(recorder_path), True)
+        if bool(scenario.get("record_carla_log", True)):
+            client.start_recorder(str(recorder_path), True)
+            recorder_started = True
 
         spawn_indices = list(scenario["spawn_point_indices"])
         episodes = int(scenario["episodes"])
@@ -388,13 +392,16 @@ def run_collection(cfg: dict[str, Any]) -> Path:
                     global_step=global_step,
                 )
                 accepted_episodes += 1
+                finished_after_episode = accepted_episodes >= episodes
             else:
                 rejected_episodes.append(event)
-            safe_stop_actor(collision_sensor)
-            safe_stop_actor(camera)
-            safe_destroy_actor(collision_sensor)
-            safe_destroy_actor(camera)
-            safe_destroy_actor(ego)
+                finished_after_episode = False
+            if not finished_after_episode:
+                safe_stop_actor(collision_sensor)
+                safe_stop_actor(camera)
+                safe_destroy_actor(collision_sensor)
+                safe_destroy_actor(camera)
+                safe_destroy_actor(ego)
             actors.clear()
             attempted_episodes += 1
         if accepted_episodes < episodes:
@@ -402,21 +409,25 @@ def run_collection(cfg: dict[str, Any]) -> Path:
                 f"Accepted only {accepted_episodes}/{episodes} episodes after {attempted_episodes} attempts; "
                 f"last rejections={rejected_episodes[-3:]}"
             )
+        collection_complete = True
     finally:
-        try:
-            client.stop_recorder()
-        except Exception:
-            pass
-        for actor in reversed(actors):
-            safe_destroy_actor(actor)
-        try:
-            traffic_manager.set_synchronous_mode(False)
-        except Exception:
-            pass
-        try:
-            world.apply_settings(original_settings)
-        except Exception:
-            pass
+        cleanup_after_success = bool(scenario.get("cleanup_after_success", True))
+        if (not collection_complete) or cleanup_after_success:
+            if recorder_started:
+                try:
+                    client.stop_recorder()
+                except Exception:
+                    pass
+            for actor in reversed(actors):
+                safe_destroy_actor(actor)
+            try:
+                traffic_manager.set_synchronous_mode(False)
+            except Exception:
+                pass
+            try:
+                world.apply_settings(original_settings)
+            except Exception:
+                pass
 
     write_hdf5(dataset_path, output)
     metadata = {

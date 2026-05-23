@@ -14,6 +14,8 @@ scenario:
   walkers: 0
   weather: ClearNoon
   force_green_lights: true
+  record_carla_log: false
+  cleanup_after_success: false
   spawn_point_indices: [3, 4, 6, 8, 10, 12]
   episodes: 60
   episode_seconds: 40.0
