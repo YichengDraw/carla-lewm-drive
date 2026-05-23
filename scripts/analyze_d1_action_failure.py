@@ -145,7 +145,10 @@ def summarize_checkpoint(checkpoint: Path, cfg: dict[str, Any], dataset_path: Pa
         if max_batches is not None and i > max_batches:
             break
         pixels = batch["pixels"].to(device)
-        pred = model.policy_action(pixels).detach().cpu().numpy().reshape(-1, model.cfg.action_dim // 3, 3)
+        route_id = batch.get("route_id")
+        if route_id is not None:
+            route_id = route_id.to(device)
+        pred = model.policy_action(pixels, route_id=route_id).detach().cpu().numpy().reshape(-1, model.cfg.action_dim // 3, 3)
         target = batch["action"][:, -1].numpy().reshape(-1, model.cfg.action_dim // 3, 3)
         pred_blocks.append(pred)
         target_blocks.append(target)
