@@ -37,7 +37,7 @@ optimizer:
   weight_decay: 1.0e-3
 
 trainer:
-  max_epochs: 80
+  max_epochs: 160
   max_steps: 20000
   batch_size: 192
   num_workers: 2
