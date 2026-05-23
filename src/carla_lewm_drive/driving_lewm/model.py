@@ -26,6 +26,7 @@ class DrivingLeWMConfig:
     predictor_heads: int = 6
     predictor_mlp_dim: int = 768
     dropout: float = 0.1
+    pred_weight: float = 1.0
     sigreg_weight: float = 0.09
     use_aux_head: bool = True
     aux_weight: float = 0.2
@@ -238,7 +239,7 @@ class DrivingLeWM(nn.Module):
         )
 
         total = (
-            pred_loss
+            self.cfg.pred_weight * pred_loss
             + self.cfg.sigreg_weight * sigreg
             + self.cfg.aux_weight * aux_total
             + self.cfg.action_weight * action_total

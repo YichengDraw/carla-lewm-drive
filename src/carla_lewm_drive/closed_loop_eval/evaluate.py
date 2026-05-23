@@ -298,6 +298,7 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
         predictor_heads=int(model_cfg["predictor_heads"]),
         predictor_mlp_dim=int(model_cfg["predictor_mlp_dim"]),
         dropout=float(model_cfg["dropout"]),
+        pred_weight=float(model_cfg.get("pred_weight", 1.0)),
         sigreg_weight=float(model_cfg["sigreg_weight"]),
         use_aux_head=bool(model_cfg.get("use_aux_head", True)),
         aux_weight=float(model_cfg["aux_weight"]),

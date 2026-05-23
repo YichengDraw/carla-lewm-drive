@@ -109,3 +109,45 @@ def test_no_aux_config_disables_aux_head_and_aux_losses(monkeypatch):
     assert float(losses["pred_aux_loss"]) == 0.0
     with pytest.raises(RuntimeError, match="use_aux_head=true"):
         model.rollout_aux(batch["pixels"], batch["action"])
+
+
+def test_pred_weight_can_disable_latent_prediction_loss(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            values = torch.arange(batch * 8, dtype=pixels.dtype, device=pixels.device).reshape(batch, 2, 4)
+            return SimpleNamespace(last_hidden_state=values)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    cfg = DrivingLeWMConfig(
+        image_size=8,
+        patch_size=4,
+        action_dim=3,
+        embed_dim=4,
+        history_size=2,
+        predictor_depth=1,
+        predictor_heads=1,
+        predictor_mlp_dim=8,
+        use_aux_head=False,
+        pred_weight=0.0,
+        sigreg_weight=0.0,
+        aux_weight=0.0,
+        action_weight=1.0,
+        pred_action_weight=0.0,
+        action_conflict_weight=0.0,
+    )
+    model = DrivingLeWM(cfg)
+    batch = {
+        **batch_with_progress([0.0, 1.0, 2.0]),
+        "pixels": torch.zeros(1, 3, 3, 8, 8),
+        "action": torch.zeros(1, 3, 3),
+    }
+
+    losses = model.loss(batch)
+
+    assert float(losses["pred_loss"]) > 0.0
+    assert float(losses["loss"]) == pytest.approx(float(losses["action_loss"]))
