@@ -321,6 +321,10 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
         progress_mode=str(model_cfg.get("progress_mode", "absolute")),
         route_vocab_size=int(model_cfg.get("route_vocab_size", 0)),
         route_embed_scale=float(model_cfg.get("route_embed_scale", 1.0)),
+        use_temporal_action_head=bool(model_cfg.get("use_temporal_action_head", False)),
+        temporal_action_include_history_actions=bool(
+            model_cfg.get("temporal_action_include_history_actions", True)
+        ),
     )
     model = DrivingLeWM(lewm_cfg)
     try:

@@ -12,6 +12,7 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     flatten_model_action_to_block,
     lane_keep_action,
     lane_keep_steer,
+    load_model,
     maybe_govern_model_speed,
     normalize_policy,
     resolve_policy,
@@ -20,6 +21,7 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     write_metrics,
 )
 from carla_lewm_drive.closed_loop_eval.metrics import DrivingEpisodeMetrics
+from carla_lewm_drive.driving_lewm.model import DrivingLeWM, DrivingLeWMConfig
 
 
 def planner_cfg():
@@ -311,6 +313,68 @@ def test_checkpoint_argument_defaults_to_planning_policy_without_config_policy()
     args = SimpleNamespace(baseline=None, policy=None, checkpoint="best.pt")
 
     assert resolve_policy(cfg, args) == "model"
+
+
+def test_load_model_preserves_temporal_action_head_config(tmp_path, monkeypatch):
+    class DummyEncoder(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            values = torch.arange(batch * 8, dtype=pixels.dtype, device=pixels.device).reshape(batch, 2, 4)
+            return SimpleNamespace(last_hidden_state=values)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    payload_cfg = {
+        "data": {"frameskip": 1, "history_size": 3, "image_size": 8},
+        "model": {
+            "encoder_scale": "tiny",
+            "patch_size": 4,
+            "embed_dim": 4,
+            "predictor_depth": 1,
+            "predictor_heads": 1,
+            "predictor_mlp_dim": 8,
+            "dropout": 0.1,
+            "pred_weight": 0.0,
+            "sigreg_weight": 0.0,
+            "use_aux_head": False,
+            "aux_weight": 0.0,
+            "pred_aux_weight": 0.0,
+            "action_weight": 1.0,
+            "pred_action_weight": 0.0,
+            "use_temporal_action_head": True,
+            "temporal_action_include_history_actions": True,
+        },
+    }
+    model = DrivingLeWM(
+        DrivingLeWMConfig(
+            image_size=8,
+            patch_size=4,
+            action_dim=3,
+            embed_dim=4,
+            history_size=3,
+            predictor_depth=1,
+            predictor_heads=1,
+            predictor_mlp_dim=8,
+            use_aux_head=False,
+            pred_weight=0.0,
+            sigreg_weight=0.0,
+            aux_weight=0.0,
+            action_weight=1.0,
+            pred_action_weight=0.0,
+            use_temporal_action_head=True,
+            temporal_action_include_history_actions=True,
+        )
+    )
+    checkpoint = tmp_path / "temporal.pt"
+    torch.save({"cfg": payload_cfg, "model": model.state_dict()}, checkpoint)
+
+    loaded = load_model(checkpoint)
+
+    assert loaded.cfg.use_temporal_action_head is True
+    assert loaded.action_head[0].normalized_shape == (21,)
 
 
 def test_apply_cli_overrides_supports_short_eval_knobs(tmp_path):
