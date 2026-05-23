@@ -148,7 +148,14 @@ def summarize_checkpoint(checkpoint: Path, cfg: dict[str, Any], dataset_path: Pa
         route_id = batch.get("route_id")
         if route_id is not None:
             route_id = route_id.to(device)
-        pred = model.policy_action(pixels, route_id=route_id).detach().cpu().numpy().reshape(-1, model.cfg.action_dim // 3, 3)
+        action_history = batch["action"][:, : int(model.cfg.history_size)].to(device)
+        pred = (
+            model.policy_action(pixels, route_id=route_id, action_history=action_history)
+            .detach()
+            .cpu()
+            .numpy()
+            .reshape(-1, model.cfg.action_dim // 3, 3)
+        )
         target = batch["action"][:, -1].numpy().reshape(-1, model.cfg.action_dim // 3, 3)
         pred_blocks.append(pred)
         target_blocks.append(target)

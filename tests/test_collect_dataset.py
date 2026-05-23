@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from carla_lewm_drive.carla_collect.collect_dataset import (
+    ControlNoiseSampler,
     FrameRecord,
     RecoveryPerturbation,
     append_episode,
@@ -80,6 +81,29 @@ def test_lane_keep_action_corrects_offset_and_limits_speed():
     assert fast[0] == pytest.approx(0.0)
     assert fast[1] == pytest.approx(0.2)
     assert fast[2] > 0.0
+
+
+def test_control_noise_sampler_perturbs_applied_control_only():
+    sampler = ControlNoiseSampler(
+        {
+            "enabled": True,
+            "warmup_seconds": 0.0,
+            "hold_steps": 2,
+            "steer_values": [0.12],
+            "steer_probability": 1.0,
+            "steer_max_abs": 0.2,
+        },
+        fixed_delta_seconds=0.05,
+        rng=np.random.default_rng(0),
+    )
+    teacher_action = np.array([0.3, 0.05, 0.0], dtype=np.float32)
+
+    applied = sampler.apply(teacher_action, step_idx=0)
+    repeated = sampler.apply(teacher_action, step_idx=1)
+
+    assert teacher_action.tolist() == pytest.approx([0.3, 0.05, 0.0])
+    assert applied.tolist() == pytest.approx([0.3, 0.17, 0.0])
+    assert repeated.tolist() == pytest.approx([0.3, 0.17, 0.0])
 
 
 def test_append_episode_records_teacher_and_perturbation_metadata():

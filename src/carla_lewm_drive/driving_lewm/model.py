@@ -41,6 +41,8 @@ class DrivingLeWMConfig:
     progress_mode: str = "absolute"
     route_vocab_size: int = 0
     route_embed_scale: float = 1.0
+    use_temporal_action_head: bool = False
+    temporal_action_include_history_actions: bool = True
 
 
 class ActionEmbedder(nn.Module):
@@ -123,9 +125,14 @@ class DrivingLeWM(nn.Module):
             if cfg.use_aux_head
             else None
         )
+        action_head_input_dim = cfg.embed_dim
+        if cfg.use_temporal_action_head:
+            action_head_input_dim = cfg.embed_dim * cfg.history_size
+            if cfg.temporal_action_include_history_actions:
+                action_head_input_dim += cfg.action_dim * cfg.history_size
         self.action_head = nn.Sequential(
-            nn.LayerNorm(cfg.embed_dim),
-            nn.Linear(cfg.embed_dim, cfg.embed_dim),
+            nn.LayerNorm(action_head_input_dim),
+            nn.Linear(action_head_input_dim, cfg.embed_dim),
             nn.GELU(),
             nn.Linear(cfg.embed_dim, cfg.action_dim),
         )
@@ -181,6 +188,34 @@ class DrivingLeWM(nn.Module):
         ids = ids.long().clamp(0, int(self.cfg.route_vocab_size) - 1)
         return emb + float(self.cfg.route_embed_scale) * self.route_embed(ids)
 
+    def temporal_action_features(
+        self,
+        emb: torch.Tensor,
+        action_history: torch.Tensor | None,
+    ) -> torch.Tensor:
+        history_size = int(self.cfg.history_size)
+        if emb.shape[1] < history_size:
+            raise ValueError(f"Need at least {history_size} frames for temporal action head, got {emb.shape[1]}")
+        features = [emb[:, -history_size:].reshape(emb.shape[0], history_size * emb.shape[-1])]
+        if self.cfg.temporal_action_include_history_actions:
+            if action_history is None:
+                raise ValueError("action_history is required when temporal_action_include_history_actions=true")
+            if action_history.shape[1] < history_size:
+                raise ValueError(
+                    f"Need at least {history_size} actions for temporal action head, got {action_history.shape[1]}"
+                )
+            features.append(action_history[:, -history_size:].float().reshape(action_history.shape[0], -1))
+        return torch.cat(features, dim=-1)
+
+    def action_predictions(
+        self,
+        emb: torch.Tensor,
+        action_history: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if self.cfg.use_temporal_action_head:
+            return self.action_head(self.temporal_action_features(emb, action_history))
+        return self.action_head(emb)
+
     def forward(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         emb = self.apply_route_condition(self.encode_pixels(batch["pixels"]), batch.get("route_id"))
         act_emb = self.action_encoder(batch["action"])
@@ -189,8 +224,13 @@ class DrivingLeWM(nn.Module):
         pred = self.predictor(ctx, ctx_act)
         target = emb[:, 1 : self.cfg.history_size + 1].detach()
         pred = pred[:, : target.shape[1]]
-        action = self.action_head(emb)
-        pred_action = self.action_head(pred)
+        if self.cfg.use_temporal_action_head:
+            action_history = batch["action"][:, : self.cfg.history_size]
+            action = self.action_predictions(emb, action_history)
+            pred_action = action.new_zeros(action.shape)
+        else:
+            action = self.action_predictions(emb)
+            pred_action = self.action_head(pred)
         out = {
             "emb": emb,
             "pred_emb": pred,
@@ -298,8 +338,9 @@ class DrivingLeWM(nn.Module):
             pred_aux_loss = F.smooth_l1_loss(out["pred_aux"], pred_aux_target)
             aux_total = aux_loss + self.cfg.pred_aux_weight * pred_aux_loss
 
-        action_target = batch["action"].float()
-        pred_action_target = action_target[:, 1 : self.cfg.history_size + 1].detach()
+        action_target_all = batch["action"].float()
+        action_target = action_target_all[:, -1] if self.cfg.use_temporal_action_head else action_target_all
+        pred_action_target = action_target_all[:, 1 : self.cfg.history_size + 1].detach()
         action_loss, action_parts = self.action_regression_loss(
             out["action"],
             action_target,
@@ -307,13 +348,17 @@ class DrivingLeWM(nn.Module):
             active_steer_weight=self.cfg.action_active_steer_weight,
             active_steer_threshold=self.cfg.action_active_steer_threshold,
         )
-        pred_action_loss, pred_action_parts = self.action_regression_loss(
-            out["pred_action"],
-            pred_action_target,
-            component_weights=self.cfg.action_component_weights,
-            active_steer_weight=self.cfg.action_active_steer_weight,
-            active_steer_threshold=self.cfg.action_active_steer_threshold,
-        )
+        if self.cfg.use_temporal_action_head:
+            pred_action_loss = zero
+            pred_action_parts = {"throttle": zero, "steer": zero, "brake": zero}
+        else:
+            pred_action_loss, pred_action_parts = self.action_regression_loss(
+                out["pred_action"],
+                pred_action_target,
+                component_weights=self.cfg.action_component_weights,
+                active_steer_weight=self.cfg.action_active_steer_weight,
+                active_steer_threshold=self.cfg.action_active_steer_threshold,
+            )
         action_total = action_loss + self.cfg.pred_action_weight * pred_action_loss
         action_conflict = self.action_conflict_loss(out["action"])
         pred_action_conflict = self.action_conflict_loss(out["pred_action"])
@@ -364,7 +409,14 @@ class DrivingLeWM(nn.Module):
         return self.aux_head(pred).squeeze(1)
 
     @torch.no_grad()
-    def policy_action(self, pixels: torch.Tensor, route_id: torch.Tensor | int | None = None) -> torch.Tensor:
+    def policy_action(
+        self,
+        pixels: torch.Tensor,
+        route_id: torch.Tensor | int | None = None,
+        action_history: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         self.eval()
         emb = self.apply_route_condition(self.encode_pixels(pixels), route_id)
+        if self.cfg.use_temporal_action_head:
+            return self.action_predictions(emb, action_history)
         return self.action_head(emb[:, -1])

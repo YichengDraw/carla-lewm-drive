@@ -765,7 +765,14 @@ def run_episode(
                 if bool(getattr(model, "_checkpoint_missing_action_head", False)):
                     raise ValueError("Action policy requires a checkpoint trained with action_head weights")
                 pixels = preprocess_pixels(image_history[-int(model.cfg.history_size) :], int(model.cfg.image_size), device)
-                action_flat = model.policy_action(pixels, route_id=int(spawn_index)).detach().cpu().numpy()[0]
+                hist = np.stack(action_history[-int(model.cfg.history_size) :], axis=0)
+                history_actions = torch.from_numpy(hist).unsqueeze(0).float().to(device)
+                action_flat = (
+                    model.policy_action(pixels, route_id=int(spawn_index), action_history=history_actions)
+                    .detach()
+                    .cpu()
+                    .numpy()[0]
+                )
                 block = flatten_model_action_to_block(action_flat, int(model.cfg.action_dim))
                 if policy == "model_action_lane_keep":
                     steer = lane_keep_steer(pre_lane_offset, pre_heading_error, eval_cfg)

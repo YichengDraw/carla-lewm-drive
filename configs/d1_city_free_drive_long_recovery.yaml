@@ -1,0 +1,73 @@
+scenario:
+  label: D1-city-free-drive-long-recovery-lanekeep
+  description: No-traffic Town03 1km route-coverage dataset with continuous small steering perturbations and lane-keep teacher labels.
+  carla_version: 0.9.16
+  host: 127.0.0.1
+  port: 2100
+  timeout_s: 30.0
+  town: Town03
+  fixed_delta_seconds: 0.05
+  synchronous_mode: true
+  traffic_manager_port: 8100
+  traffic_manager_seed: 20260525
+  vehicles: 0
+  walkers: 0
+  weather: ClearNoon
+  force_green_lights: true
+  record_carla_log: false
+  cleanup_after_success: true
+  teacher_policy: lane_keep
+  spawn_point_indices: [3, 4, 6, 10, 12]
+  episodes: 5
+  episode_seconds: 240.0
+  target_speed_kmh: 16.2
+  recovery:
+    enabled: false
+  control_noise_seed: 20260525
+  control_noise:
+    enabled: true
+    warmup_seconds: 4.0
+    hold_steps: 12
+    steer_probability: 0.70
+    steer_values: [-0.08, -0.05, -0.03, 0.0, 0.03, 0.05, 0.08]
+    steer_max_abs: 0.08
+  quality_gate:
+    enabled: true
+    max_attempts: 30
+    min_progress_m: 950.0
+    max_collision_frames: 0
+    max_offroad_fraction: 0.005
+    max_red_light_fraction: 0.0
+    max_blocked_fraction: 0.02
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+lane_keep:
+  target_speed_mps: 4.5
+  throttle: 0.30
+  speed_kp: 0.05
+  throttle_min: 0.12
+  throttle_max: 0.48
+  overspeed_margin_mps: 1.0
+  brake_kp: 0.10
+  steer_limit: 0.35
+  steer_bias: 0.0
+  lane_offset_gain: 0.35
+  heading_error_gain: 1.2
+
+output:
+  dataset_path: data/d1_city_free_drive_long_recovery/carla_d1_city_free_drive_long_recovery_fast.h5
+  metadata_path: data/d1_city_free_drive_long_recovery/metadata.json
+  recorder_path: data/d1_city_free_drive_long_recovery/carla_d1_city_free_drive_long_recovery.log
+  preview_dir: data/d1_city_free_drive_long_recovery/previews
+  pixel_compression: none

@@ -188,6 +188,56 @@ def test_route_conditioning_is_optional_and_requires_route_ids(monkeypatch):
         model.policy_action(pixels)
 
 
+def test_temporal_action_head_uses_history_actions(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            values = torch.arange(batch * 8, dtype=pixels.dtype, device=pixels.device).reshape(batch, 2, 4)
+            return SimpleNamespace(last_hidden_state=values)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    cfg = DrivingLeWMConfig(
+        image_size=8,
+        patch_size=4,
+        action_dim=3,
+        embed_dim=4,
+        history_size=3,
+        predictor_depth=1,
+        predictor_heads=1,
+        predictor_mlp_dim=8,
+        use_aux_head=False,
+        pred_weight=0.0,
+        sigreg_weight=0.0,
+        aux_weight=0.0,
+        action_weight=1.0,
+        pred_action_weight=0.0,
+        use_temporal_action_head=True,
+        temporal_action_include_history_actions=True,
+    )
+    model = DrivingLeWM(cfg)
+    pixels = torch.zeros(2, 4, 3, 8, 8)
+    actions = torch.zeros(2, 4, 3)
+    batch = {
+        **batch_with_progress([0.0, 1.0, 2.0, 3.0]),
+        "pixels": pixels,
+        "action": actions,
+    }
+
+    out = model.forward(batch)
+    policy = model.policy_action(pixels[:, -3:], action_history=actions[:, :3])
+    losses = model.loss(batch)
+
+    assert out["action"].shape == (2, 3)
+    assert policy.shape == (2, 3)
+    assert float(losses["pred_action_loss"]) == 0.0
+    with pytest.raises(ValueError, match="action_history is required"):
+        model.policy_action(pixels[:, -3:])
+
+
 def test_pred_weight_can_disable_latent_prediction_loss(monkeypatch):
     class DummyEncoder(nn.Module):
         def __init__(self) -> None:

@@ -33,6 +33,45 @@ class RecoveryPerturbation:
     yaw_offset_deg: float = 0.0
 
 
+class ControlNoiseSampler:
+    """Applies bounded control perturbations while the recorded target remains the teacher action."""
+
+    def __init__(self, cfg: dict[str, Any] | None, *, fixed_delta_seconds: float, rng: np.random.Generator) -> None:
+        self.cfg = cfg or {}
+        self.enabled = bool(self.cfg.get("enabled", False))
+        self.rng = rng
+        self.hold_steps = max(1, int(self.cfg.get("hold_steps", 8)))
+        self.warmup_steps = max(0, int(round(float(self.cfg.get("warmup_seconds", 0.0)) / fixed_delta_seconds)))
+        self.probability = float(self.cfg.get("steer_probability", 1.0))
+        self.steer_std = float(self.cfg.get("steer_std", 0.0))
+        self.steer_min_abs = abs(float(self.cfg.get("steer_min_abs", 0.0)))
+        self.steer_max_abs = abs(float(self.cfg.get("steer_max_abs", 0.0)))
+        self.steer_values = [float(x) for x in self.cfg.get("steer_values", [])]
+        self.current_steer = 0.0
+
+    def _sample_steer(self) -> float:
+        if self.rng.random() > self.probability:
+            return 0.0
+        if self.steer_values:
+            steer = float(self.rng.choice(np.asarray(self.steer_values, dtype=np.float32)))
+        else:
+            steer = float(self.rng.normal(0.0, self.steer_std))
+        if self.steer_min_abs > 0.0 and 0.0 < abs(steer) < self.steer_min_abs:
+            steer = float(np.sign(steer) * self.steer_min_abs)
+        if self.steer_max_abs > 0.0:
+            steer = float(np.clip(steer, -self.steer_max_abs, self.steer_max_abs))
+        return steer
+
+    def apply(self, action: np.ndarray, step_idx: int) -> np.ndarray:
+        out = np.asarray(action, dtype=np.float32).reshape(3).copy()
+        if not self.enabled or int(step_idx) < self.warmup_steps:
+            return out
+        if int(step_idx) % self.hold_steps == 0:
+            self.current_steer = self._sample_steer()
+        out[1] = float(np.clip(float(out[1]) + self.current_steer, -1.0, 1.0))
+        return out
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect a CARLA HDF5 dataset for Driving-LeWM.")
     parser.add_argument("--config", type=Path, default=Path("configs/d0_smoke.yaml"))
@@ -386,6 +425,12 @@ def run_collection(cfg: dict[str, Any]) -> Path:
             if teacher_policy not in {"autopilot", "lane_keep"}:
                 raise ValueError("scenario.teacher_policy must be 'autopilot' or 'lane_keep'")
             perturbation = select_recovery_perturbation(attempted_episodes, scenario.get("recovery", {}))
+            noise_rng = np.random.default_rng(int(scenario.get("control_noise_seed", scenario["traffic_manager_seed"])) + attempted_episodes)
+            control_noise = ControlNoiseSampler(
+                scenario.get("control_noise", {}),
+                fixed_delta_seconds=float(scenario["fixed_delta_seconds"]),
+                rng=noise_rng,
+            )
             ego = spawn_ego(carla, world, spawn_index, perturbation=perturbation)
             actors.append(ego)
             camera = make_camera(carla, world, ego, cfg)
@@ -418,9 +463,10 @@ def run_collection(cfg: dict[str, Any]) -> Path:
             travelled_distance = 0.0
             blocked_count = 0
 
-            for _ in range(steps_per_episode):
+            for step_in_episode in range(steps_per_episode):
                 if pending_action is not None:
-                    ego.apply_control(to_vehicle_control(carla, pending_action))
+                    applied_action = control_noise.apply(pending_action, step_in_episode)
+                    ego.apply_control(to_vehicle_control(carla, applied_action))
                 frame_id = world.tick()
                 image = q.get(timeout=5.0)
                 while image.frame < frame_id:
