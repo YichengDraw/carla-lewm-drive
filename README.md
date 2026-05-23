@@ -106,8 +106,8 @@ Run the main tiny model:
 ```bash
 carla-lewm-train --config configs/train_tiny.yaml \
   --dataset-path data/d0_train/carla_d0_train_fast.h5 \
-  --batch-size 192 \
-  --num-workers 2 \
+  --batch-size 256 \
+  --num-workers 4 \
   --max-epochs 5 \
   --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_e5 \
   --run-name d0_tiny_h3_fs5_delta_predaux_e5

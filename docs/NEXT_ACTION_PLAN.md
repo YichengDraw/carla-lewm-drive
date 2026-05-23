@@ -130,8 +130,8 @@ Frame-level acceptance:
 PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
   --config configs/train_d1_tiny_core_action_noaux_20k.yaml \
   --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5 \
-  --batch-size 192 \
-  --num-workers 2 \
+  --batch-size 256 \
+  --num-workers 4 \
   --max-steps 20000 \
   --output-dir outputs/d1_tiny_h3_fs5_core_action_noaux_20k \
   --run-name d1_tiny_h3_fs5_core_action_noaux_20k
