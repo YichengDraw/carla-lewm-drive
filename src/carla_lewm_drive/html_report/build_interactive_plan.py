@@ -132,12 +132,12 @@ HTML = r"""<!doctype html>
           <div class="metric"><span>D1 数据</span><strong>48k</strong><span>60 episodes，strict QC pass，contact sheet 已检查</span></div>
           <div class="metric"><span>Batch probe</span><strong>256</strong><span>RTX 5090 峰值 24.388GB，正式 run 用 workers=4</span></div>
           <div class="metric"><span>Clean no-aux</span><strong>running</strong><span><code>use_aux_head: false</code>，aux/pred_aux 全程 0</span></div>
-          <div class="metric"><span>Best val</span><strong>0.2297</strong><span>epoch 6 / step 876，仍在训练</span></div>
+          <div class="metric"><span>Best val</span><strong>0.15595</strong><span>epoch 27 / step 3942，仍在训练</span></div>
           <div class="metric"><span>Monitor</span><strong>5min</strong><span><code>outputs/remote_logs/d1_noaux_watch.log</code></span></div>
-          <div class="metric"><span>GitHub</span><strong>82e2040</strong><span>local main == origin/main</span></div>
+          <div class="metric"><span>Step</span><strong>&gt;4050</strong><span>20k 上限，等待 early-stop 或 plateau</span></div>
         </div>
         <p>当前 W&B run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7"><code>d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7</code></a>。</p>
-        <div class="callout ok">截至 2026-05-23 12:46 Asia/Shanghai，训练进入 epoch 7；validation loss 已从 epoch 1 的 0.2819 改善到 epoch 6 的 0.2297。闭环 D1-A 评估等待训练达到 early-stop 最小步数或自然停止后再跑。</div>
+        <div class="callout ok">截至 2026-05-23 14:56 Asia/Shanghai，训练进入 epoch 28；validation loss 已从 epoch 1 的 0.2819 改善到 epoch 27 / step 3942 的 0.15595。aux/pred_aux 指标全程为 0，确认主 run 是真正 no-aux。闭环 D1-A 评估等待训练 early-stop、自然停止，或出现清晰 plateau 后再跑。</div>
       </section>
 
       <section id="task" data-kind="task">
@@ -147,7 +147,7 @@ HTML = r"""<!doctype html>
           <tr>
             <td><code>D1-A</code></td>
             <td>Town03，白天，干路面，无车，无行人，绿灯，6 个固定 spawn route。</td>
-            <td>500m cap；collision/off-road/blocked 立即停表；speed-limit 只记软惩罚；覆盖自然直行、弯道和路口通过。</td>
+            <td>500m cap；collision/off-road/blocked 立即停表；speed-limit 只记软惩罚；覆盖自然直行、弯道、路口左/右转。</td>
             <td>模型能在城市道路视觉分布上保持车道和路边安全。</td>
           </tr>
           <tr>
@@ -158,11 +158,12 @@ HTML = r"""<!doctype html>
           </tr>
           <tr>
             <td><code>D2</code></td>
-            <td>稀疏车辆，固定 traffic seed。</td>
-            <td>加入车车碰撞、前车交互和有命令标签的变道。</td>
-            <td>只有 D1 稳定后再进入。</td>
+            <td>稀疏车辆，固定 traffic seed；或 D1-C route-command setting。</td>
+            <td>加入车车碰撞、前车交互，以及带 <code>change_lane_left/right</code> 命令标签的变道。</td>
+            <td>只有 D1 稳定且 route command 标签可用后再进入。</td>
           </tr>
         </table>
+        <div class="callout">左右转应该在 D1-A 就覆盖，因为路口和弯道有明确道路几何目标。变道暂时不放进第一轮，因为无车、无导航命令时，模型没有唯一的“何时变道”目标；先把 stay-in-lane 和自然转向做实，再加命令化变道。</div>
       </section>
 
       <section id="metrics" data-kind="eval">

@@ -33,7 +33,8 @@ Purpose: isolate vision, steering, road-boundary awareness, and long-horizon dri
 - Weather: `ClearNoon`.
 - Lights: `force_green_lights: true`.
 - Routes: six fixed spawn indices, cycled deterministically.
-- Maneuvers: include natural straight/curve/intersection driving from fixed routes; defer commanded lane changes until route-command labels exist.
+- Maneuvers: include natural straight, curve, and intersection driving from fixed routes. This covers left/right road geometry when the route naturally turns.
+- Commanded lane changes are intentionally deferred until route-command labels exist. In a no-traffic setting, "change lane now" is not a well-defined target unless the dataset includes an explicit command or navigation objective.
 - Episode target: `500m` closed-loop cap.
 - Primary metric: `Safety IFD`, meters before collision, off-road, or blocked.
 - Secondary logs: lane offset, heading error, action trace, contact sheet.
@@ -50,6 +51,7 @@ Purpose: add traffic-light rule following after D1-A is stable.
 ### Later D2
 
 Add other vehicles only after D1-A and D1-B are reproducible. The first vehicle setting should use sparse traffic and fixed seeds, not dense urban traffic.
+Lane-change episodes enter here or in a D1-C command-following phase, after the policy has a route command such as `follow_lane`, `left`, `right`, `straight`, or `change_lane_left/right`.
 
 ## Metric Contract
 
