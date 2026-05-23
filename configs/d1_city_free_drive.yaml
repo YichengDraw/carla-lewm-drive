@@ -1,0 +1,46 @@
+scenario:
+  label: D1-city-free-drive-no-traffic
+  description: No-traffic city-street dataset for distance-first safe driving; speed is secondary.
+  carla_version: 0.9.16
+  host: 127.0.0.1
+  port: 2000
+  timeout_s: 10.0
+  town: Town03
+  fixed_delta_seconds: 0.05
+  synchronous_mode: true
+  traffic_manager_port: 8000
+  traffic_manager_seed: 20260523
+  vehicles: 0
+  walkers: 0
+  weather: ClearNoon
+  force_green_lights: true
+  spawn_point_indices: [3, 4, 6, 8, 10, 12]
+  episodes: 120
+  episode_seconds: 50.0
+  target_speed_kmh: 20.0
+  quality_gate:
+    enabled: true
+    max_attempts: 240
+    min_progress_m: 220.0
+    max_collision_frames: 0
+    max_offroad_fraction: 0.005
+    max_red_light_fraction: 0.0
+    max_blocked_fraction: 0.05
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+output:
+  dataset_path: data/d1_city_free_drive/carla_d1_city_free_drive.h5
+  metadata_path: data/d1_city_free_drive/metadata.json
+  recorder_path: data/d1_city_free_drive/carla_d1_city_free_drive.log
+  preview_dir: data/d1_city_free_drive/previews

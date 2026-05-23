@@ -11,6 +11,8 @@ def test_mini_driving_score_penalizes_infractions():
     assert crash.mini_driving_score < clean.mini_driving_score
     assert speeding.mini_driving_score < clean.mini_driving_score
     assert speeding.hard_failed
+    assert not speeding.primary_safety_failed
+    assert not speeding.primary_or_red_failed
 
 
 def test_infraction_free_distance_uses_first_infraction_distance():
@@ -34,4 +36,6 @@ def test_aggregate_metrics():
     assert out["episodes"] == 2
     assert out["mean_route_completion_pct"] == 75.0
     assert out["success_rate_no_hard_infraction"] == 0.5
+    assert out["success_rate_no_primary_safety_infraction"] == 0.5
+    assert out["success_rate_no_primary_or_red_infraction"] == 0.5
     assert out["speed_limit_count"] == 0

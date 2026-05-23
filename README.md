@@ -11,7 +11,7 @@ The project is intentionally narrow: start with an easy single-ego CARLA setting
 - StableWorldModel-style HDF5 layout: `pixels`, `action`, `state`, `proprio`, `ep_idx`, `step_idx`, `ep_len`, `ep_offset`.
 - Frame-level QC with strict gates for missing keys, row mismatch, blank frames, non-finite actions, inconsistent episode indices, and driving infractions.
 - Fast uncompressed HDF5 export (`carla-lewm-export-fast-hdf5`) for random-access training on the remote GPU host.
-- Compact Driving-LeWM with ViT `tiny` and `small` configs, latent prediction, SIGReg-style regularization, and auxiliary driving heads.
+- Compact Driving-LeWM with ViT `tiny` and `small` configs, latent prediction, SIGReg-style regularization, optional auxiliary driving heads, and an action-policy readout.
 - W&B logging for serious runs plus local `metrics.csv`, `split_manifest.json`, `best.pt`, and `test_metrics.json`.
 - Closed-loop evaluator for CARLA autopilot baselines, checkpoint-driven model control, lane-keep/hybrid sanity checks, and speed-limit-aware `Infraction-Free Distance` / `Mini Driving Score`.
 - Action-prior extension: a latent action head, 10k-step W&B run, action trace diagnostics, and throttle/brake sanitization for CARLA control.
@@ -44,7 +44,7 @@ Status after the first D0 execution pass:
 - The conflict-aware run required adding the same CEM planner block to `eval_d0_model_action_speedgate.yaml` and `eval_d0_model_action_lane_keep_speedgate.yaml`; without that, the action-policy evaluator failed before closed-loop scoring.
 - Closed-loop candidate comparison on the conflict-aware run: total-loss `best.pt` reached `22.14m` pure and `22.94m` lane-keep; action-best step `4350` reached `25.06m` pure and `25.00m` lane-keep; pred-action-best step `5800` reached `20.67m` pure and `20.87m` lane-keep. All six had zero collision/off-road/red-light/blocked events but failed the 200m target because each triggered one speed-limit violation.
 
-Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified model-driven D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not solve steering or speed compliance. The action-prior head learned useful controls only after the evaluator enforced the same throttle/brake exclusivity that exists in the dataset. Conflict-aware action training improved the best pure action distance slightly, but it did not solve speed compliance. The current 200m pass remains a governed hybrid result, not a pure action-policy success.
+Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified model-driven D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not solve steering or speed compliance. The action-prior head learned useful controls only after the evaluator enforced the same throttle/brake exclusivity that exists in the dataset. Conflict-aware action training improved the best pure action distance slightly, but it did not solve speed compliance. The current 200m pass remains a governed hybrid result. The next task is D1 city free-drive: no other vehicles, distance before road-safety failures as the primary metric, red lights second, speed-limit violations as soft logged penalties in the first pass.
 
 ## Installation
 
@@ -127,16 +127,21 @@ carla-lewm-train --config configs/train_tiny_action_prior_10k.yaml \
   --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
 ```
 
-Next conflict-aware action run:
+Next D1 no-traffic city free-drive run:
 
 ```bash
-carla-lewm-train --config configs/train_tiny_action_conflict_10k.yaml \
-  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
+carla-lewm-collect --config configs/d1_city_free_drive.yaml
+carla-lewm-qc --dataset data/d1_city_free_drive/carla_d1_city_free_drive.h5 \
+  --out-dir outputs/qc_d1_city_free_drive --strict
+carla-lewm-export-fast-hdf5 --src data/d1_city_free_drive/carla_d1_city_free_drive.h5 \
+  --dst data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5 --chunk-frames 256 --overwrite
+carla-lewm-train --config configs/train_d1_tiny_core_action_noaux_20k.yaml \
+  --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5 \
   --batch-size 192 \
   --num-workers 2 \
-  --max-steps 10000 \
-  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_conflict_10k \
-  --run-name d0_tiny_h3_fs5_delta_predaux_action_conflict_10k
+  --max-steps 20000 \
+  --output-dir outputs/d1_tiny_h3_fs5_core_action_noaux_20k \
+  --run-name d1_tiny_h3_fs5_core_action_noaux_20k
 ```
 
 ## Evaluation
@@ -180,6 +185,13 @@ carla-lewm-eval --config configs/eval_d0_model_action_speedgate.yaml \
   --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m_exclusive_v1
 carla-lewm-eval --config configs/eval_d0_model_action_lane_keep_speedgate.yaml \
   --output-dir outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m_brake_release_v2
+```
+
+For the next D1 task:
+
+```bash
+carla-lewm-eval --config configs/eval_d1_city_free_drive_model_action.yaml \
+  --output-dir outputs/d1_eval_tiny_core_action_noaux_model_action_500m
 ```
 
 ## Interactive Plan

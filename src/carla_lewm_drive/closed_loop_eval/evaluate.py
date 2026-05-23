@@ -258,12 +258,13 @@ class EpisodeAccumulator:
         self.collision_count += int(count)
         self._mark_first_infraction()
 
-    def update_flag(self, name: str, active: bool) -> None:
+    def update_flag(self, name: str, active: bool, *, count_as_first_infraction: bool = True) -> None:
         previous = bool(getattr(self, f"{name}_active"))
         setattr(self, f"{name}_active", bool(active))
         if active and not previous:
             setattr(self, f"{name}_count", int(getattr(self, f"{name}_count")) + 1)
-            self._mark_first_infraction()
+            if count_as_first_infraction:
+                self._mark_first_infraction()
 
     def to_metrics(self) -> DrivingEpisodeMetrics:
         return DrivingEpisodeMetrics(
@@ -410,6 +411,7 @@ def write_action_trace(output_dir: Path, episode_idx: int, rows: list[dict[str, 
         "lane_offset_m",
         "heading_error_rad",
         "offroad",
+        "red_light",
         "speed_limit_violation",
         "blocked",
         "collision_count",
@@ -825,7 +827,11 @@ def run_episode(
                 acc.update_flag("offroad", bool(offroad))
                 acc.update_flag("red_light", red_light)
                 acc.update_flag("blocked", blocked)
-                acc.update_flag("speed_limit", speed_limit_violation)
+                acc.update_flag(
+                    "speed_limit",
+                    speed_limit_violation,
+                    count_as_first_infraction=bool(eval_cfg.get("speed_limit_as_infraction", True)),
+                )
                 if bool(eval_cfg.get("save_action_trace", True)):
                     action_trace.append(
                         {
@@ -842,6 +848,7 @@ def run_episode(
                             "lane_offset_m": float(lane_offset),
                             "heading_error_rad": float(heading_error),
                             "offroad": int(bool(offroad)),
+                            "red_light": int(bool(red_light)),
                             "speed_limit_violation": int(bool(speed_limit_violation)),
                             "blocked": int(bool(blocked)),
                             "collision_count": int(acc.collision_count),
@@ -852,6 +859,10 @@ def run_episode(
                 maybe_store_frame(output_dir, frames, rgb, episode=episode_idx, step=step, eval_cfg=eval_cfg)
 
                 if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
+                    break
+                if bool(eval_cfg.get("stop_on_offroad", False)) and acc.offroad_count > 0:
+                    break
+                if bool(eval_cfg.get("stop_on_red_light", False)) and acc.red_light_count > 0:
                     break
                 if bool(eval_cfg.get("stop_on_blocked", True)) and blocked:
                     break
@@ -868,6 +879,10 @@ def run_episode(
                 action_history.append(block[:frameskip].reshape(-1).astype(np.float32))
 
             if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
+                break
+            if bool(eval_cfg.get("stop_on_offroad", False)) and acc.offroad_count > 0:
+                break
+            if bool(eval_cfg.get("stop_on_red_light", False)) and acc.red_light_count > 0:
                 break
             if bool(eval_cfg.get("stop_on_blocked", True)) and acc.blocked_count > 0:
                 break

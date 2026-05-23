@@ -49,6 +49,14 @@ class DrivingEpisodeMetrics:
             + self.speed_limit_count
         ) > 0
 
+    @property
+    def primary_safety_failed(self) -> bool:
+        return (self.collision_count + self.offroad_count + self.blocked_count) > 0
+
+    @property
+    def primary_or_red_failed(self) -> bool:
+        return (self.collision_count + self.offroad_count + self.red_light_count + self.blocked_count) > 0
+
 
 def aggregate_metrics(rows: list[DrivingEpisodeMetrics]) -> dict[str, float]:
     if not rows:
@@ -60,6 +68,8 @@ def aggregate_metrics(rows: list[DrivingEpisodeMetrics]) -> dict[str, float]:
         "mean_route_completion_pct": sum(r.route_completion_pct for r in rows) / n,
         "mean_mini_driving_score": sum(r.mini_driving_score for r in rows) / n,
         "success_rate_no_hard_infraction": sum(0 if r.hard_failed else 1 for r in rows) / n,
+        "success_rate_no_primary_safety_infraction": sum(0 if r.primary_safety_failed else 1 for r in rows) / n,
+        "success_rate_no_primary_or_red_infraction": sum(0 if r.primary_or_red_failed else 1 for r in rows) / n,
         "collision_count": sum(r.collision_count for r in rows),
         "offroad_count": sum(r.offroad_count for r in rows),
         "red_light_count": sum(r.red_light_count for r in rows),

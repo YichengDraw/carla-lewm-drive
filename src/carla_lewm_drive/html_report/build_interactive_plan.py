@@ -15,86 +15,83 @@ HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CARLA-LeWM 小规模长程驾驶执行看板</title>
+  <title>CARLA-LeWM D1 城市自由行驶计划</title>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f8fa;
+      --bg: #f6f7f9;
       --panel: #ffffff;
-      --ink: #1d2433;
-      --muted: #657082;
-      --line: #d9dee7;
-      --accent: #0b6bcb;
-      --accent-2: #0f8a72;
-      --warn: #b96b00;
-      --bad: #b42318;
-      --good-bg: #e9f7f2;
-      --warn-bg: #fff4df;
-      --bad-bg: #fdeceb;
-      --shadow: 0 10px 28px rgba(21, 32, 54, 0.10);
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d8dee8;
+      --nav: #202a3a;
+      --blue: #0b63ce;
+      --green: #0b7a5b;
+      --amber: #a86100;
+      --red: #b42318;
+      --green-bg: #e8f6f0;
+      --amber-bg: #fff3dc;
+      --red-bg: #fdeceb;
+      --shadow: 0 10px 26px rgba(23, 32, 51, 0.08);
     }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Inter, "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--ink); line-height: 1.55; letter-spacing: 0; }
-    header { background: #152033; color: #fff; padding: 22px 28px; }
+    header { background: var(--nav); color: #fff; padding: 22px 28px; }
     header h1 { margin: 0 0 6px; font-size: 24px; font-weight: 760; }
-    header p { margin: 0; color: #cbd5e1; max-width: 980px; }
-    .toolbar { position: sticky; top: 0; z-index: 20; display: flex; gap: 10px; align-items: center; padding: 10px 18px; background: rgba(255,255,255,.96); border-bottom: 1px solid var(--line); }
-    .toolbar input { width: min(360px, 45vw); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
+    header p { margin: 0; color: #d5dbe7; max-width: 1040px; }
+    .toolbar { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 18px; background: rgba(255, 255, 255, .96); border-bottom: 1px solid var(--line); }
+    .toolbar input { width: min(390px, 52vw); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
     button, .tab { border: 1px solid var(--line); background: #fff; color: var(--ink); padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 14px; }
-    button:hover, .tab.active { border-color: var(--accent); color: var(--accent); }
-    .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; max-width: 1240px; margin: 0 auto; padding: 18px; }
+    button:hover, .tab.active { border-color: var(--blue); color: var(--blue); }
+    .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; max-width: 1250px; margin: 0 auto; padding: 18px; }
     nav { position: sticky; top: 58px; align-self: start; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 12px; }
     nav a { display: block; color: var(--ink); text-decoration: none; padding: 7px 8px; border-radius: 6px; font-size: 14px; }
-    nav a:hover { background: #eef5ff; color: var(--accent); }
+    nav a:hover { background: #eef5ff; color: var(--blue); }
     main { display: grid; gap: 16px; }
     section, details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 16px; }
     section h2, details h2 { margin: 0 0 10px; font-size: 18px; }
     details summary { cursor: pointer; font-weight: 720; font-size: 17px; }
-    a { color: var(--accent); }
-    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
-    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; }
-    .metric strong { display: block; font-size: 18px; }
+    a { color: var(--blue); }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; min-height: 92px; }
+    .metric strong { display: block; font-size: 20px; margin: 2px 0; }
     .metric span { color: var(--muted); font-size: 13px; }
-    .callout { border-left: 4px solid var(--warn); background: var(--warn-bg); padding: 10px 12px; border-radius: 6px; margin-top: 12px; }
-    .ok { border-left-color: var(--accent-2); background: var(--good-bg); }
-    .bad { border-left-color: var(--bad); background: var(--bad-bg); }
+    .callout { border-left: 4px solid var(--amber); background: var(--amber-bg); padding: 10px 12px; border-radius: 6px; margin-top: 12px; }
+    .ok { border-left-color: var(--green); background: var(--green-bg); }
+    .bad { border-left-color: var(--red); background: var(--red-bg); }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 8px; vertical-align: top; }
     th { background: #f1f4f8; }
     code { background: #eef2f7; padding: 1px 5px; border-radius: 4px; }
-    pre { overflow: auto; background: #101827; color: #d9e7ff; padding: 12px; border-radius: 8px; }
-    .tag { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+    pre { overflow: auto; background: #111927; color: #dbeafe; padding: 12px; border-radius: 8px; font-size: 13px; }
+    .tag { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
     .tag.good { color: #0f6b50; border-color: #b7e4d4; background: #e9f7f2; }
     .tag.warn { color: #8a4d00; border-color: #f1cf8a; background: #fff4df; }
     .tag.bad { color: #9f241a; border-color: #f2b8b5; background: #fdeceb; }
-    .bar { height: 10px; background: #e7edf5; border-radius: 999px; overflow: hidden; min-width: 130px; }
-    .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
-    .bar.bad > span { background: var(--bad); }
     mark.search-hit { background: #fff08a; padding: 0 2px; }
     mark.current-hit { outline: 2px solid #f59e0b; }
     .hidden-kind { display: none; }
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       nav { position: static; }
-      .metrics, .grid { grid-template-columns: 1fr; }
-      .toolbar { flex-wrap: wrap; }
+      .grid { grid-template-columns: 1fr; }
       .toolbar input { width: 100%; }
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>CARLA-LeWM 小规模长程驾驶执行看板</h1>
-    <p>先看当前结论，再看数据、W&B、闭环评估证据；所有 run name 旁边都解释了配置含义。</p>
+    <h1>CARLA-LeWM D1 城市自由行驶计划</h1>
+    <p>下一组实验改成无车城市道路：核心问题是能开多远且不碰路边、不离开车道、不撞障碍；红绿灯第二优先级；限速作为第一轮软惩罚。</p>
   </header>
   <div class="toolbar">
-    <input id="search" placeholder="搜索 phase / W&B / tiny / small / IFD / QC">
+    <input id="search" placeholder="搜索 D1 / aux / W&B / IFD / noaux / red light">
     <button id="prev" type="button">&lt;</button>
     <button id="next" type="button">&gt;</button>
     <span id="count" class="tag">0</span>
     <button class="tab active" data-filter="all" type="button">全部</button>
-    <button class="tab" data-filter="data" type="button">数据</button>
+    <button class="tab" data-filter="task" type="button">任务</button>
     <button class="tab" data-filter="train" type="button">训练</button>
     <button class="tab" data-filter="eval" type="button">评估</button>
     <button class="tab" data-filter="risk" type="button">风险</button>
@@ -102,28 +99,166 @@ HTML = r"""<!doctype html>
   <div class="layout">
     <nav>
       <a href="#verdict">当前结论</a>
-      <a href="#terms">名词速查</a>
+      <a href="#task">D1 任务定义</a>
+      <a href="#metrics">指标优先级</a>
+      <a href="#aux">Aux 决策</a>
+      <a href="#evidence">已有证据</a>
+      <a href="#matrix">实验矩阵</a>
       <a href="#decoder">实验名解码</a>
-      <a href="#data">数据证据</a>
-      <a href="#wandb">W&B 证据</a>
-      <a href="#eval">闭环评估</a>
-      <a href="#phases">阶段计划</a>
       <a href="#commands">命令</a>
       <a href="#gates">Go / No-Go</a>
+      <a href="#terms">名词速查</a>
     </nav>
     <main id="content">
       <section id="verdict" data-kind="all">
         <h2>当前结论</h2>
         <div class="metrics">
-          <div class="metric"><span>Phase</span><strong>D0 pass</strong><span>采集、QC、训练、短评估完成</span></div>
-          <div class="metric"><span>Dataset</span><strong>48k</strong><span>D0-train 严格 QC 通过</span></div>
-          <div class="metric"><span>Best offline</span><strong>tiny delta</strong><span>test/loss 0.2147</span></div>
-          <div class="metric"><span>Model-only</span><strong>190m</strong><span>tiny delta throttle-only 通过</span></div>
-          <div class="metric"><span>Governed hybrid</span><strong>200m</strong><span>速度门控下通过</span></div>
-          <div class="metric"><span>Action hybrid</span><strong>200m</strong><span>action-prior + governor 通过</span></div>
+          <div class="metric"><span>D0 model-only</span><strong>190m</strong><span>throttle-only 简化目标通过</span></div>
+          <div class="metric"><span>D0 pure action</span><strong>~25m</strong><span>无碰撞/离路，因限速停表</span></div>
+          <div class="metric"><span>D0 governed hybrid</span><strong>200m</strong><span>lane/speed governor 参与</span></div>
+          <div class="metric"><span>Next task</span><strong>D1-A</strong><span>无车城市道路，绿灯</span></div>
+          <div class="metric"><span>Next metric</span><strong>Safety IFD</strong><span>安全距离优先</span></div>
+          <div class="metric"><span>Next loss</span><strong>no-aux</strong><span>aux 只做消融</span></div>
         </div>
         <div class="callout ok">
-          当前状态：数据和训练流水线可信；tiny/small delta-progress + predicted-aux 在隔离 CARLA 2100 端口和 throttle-only 简化目标下 190m 无 hard infraction。10k-step action-prior tiny run 已完成；未经 throttle/brake 互斥化的 action policy 会原地 blocked，互斥化后 pure action 到 24.84m 因超速失败，action+lane-keep 到 157.69m 因 blocked 失败；加入 speed governor 的 brake-release 后，action+lane-keep 在 200m speed-gated 指标下通过。这个 200m 是 governed hybrid 成果，不是 pure action 成果。
+          方向调整：下一组不把限速失败当成主要瓶颈处理。先定义一个更透明的任务：在无其他车辆的城市道路上尽量开远，主失败是 collision / off-road / blocked；红灯是第二阶段；速度违规只降低分数和留下 trace。
+        </div>
+      </section>
+
+      <section id="task" data-kind="task">
+        <h2>D1 任务定义</h2>
+        <table>
+          <tr><th>阶段</th><th>场景</th><th>规则</th><th>通过含义</th></tr>
+          <tr>
+            <td><code>D1-A</code></td>
+            <td>Town03，白天，干路面，无车，无行人，绿灯，6 个固定 spawn route。</td>
+            <td>500m cap；collision/off-road/blocked 立即停表；speed-limit 只记软惩罚；覆盖自然直行、弯道和路口通过。</td>
+            <td>模型能在城市道路视觉分布上保持车道和路边安全。</td>
+          </tr>
+          <tr>
+            <td><code>D1-B</code></td>
+            <td>同 D1-A，真实交通灯。</td>
+            <td>red-light violation 停表；speed-limit 继续软惩罚。</td>
+            <td>模型开始体现交通规则，而不是只沿路走。</td>
+          </tr>
+          <tr>
+            <td><code>D2</code></td>
+            <td>稀疏车辆，固定 traffic seed。</td>
+            <td>加入车车碰撞、前车交互和有命令标签的变道。</td>
+            <td>只有 D1 稳定后再进入。</td>
+          </tr>
+        </table>
+      </section>
+
+      <section id="metrics" data-kind="eval">
+        <h2>指标优先级</h2>
+        <table>
+          <tr><th>优先级</th><th>指标</th><th>配置/解释</th></tr>
+          <tr><td>1</td><td><code>mean_infraction_free_distance_m</code></td><td>D1-A 中 speed 不计入 first infraction；主看碰撞、离路、blocked 之前的距离。</td></tr>
+          <tr><td>1</td><td><code>success_rate_no_primary_safety_infraction</code></td><td>没有 collision、off-road、blocked 的 episode 比例。</td></tr>
+          <tr><td>2</td><td><code>success_rate_no_primary_or_red_infraction</code></td><td>D1-B 主指标：没有 collision、off-road、red-light、blocked。</td></tr>
+          <tr><td>3</td><td><code>speed_limit_count</code></td><td>速度规则违规次数，保留为可解释惩罚。</td></tr>
+          <tr><td>3</td><td><code>mean_mini_driving_score</code></td><td>路线完成度乘所有违规惩罚，用于防止完全忽略速度。</td></tr>
+        </table>
+        <div class="callout">实现更新：评估器支持 <code>speed_limit_as_infraction: false</code>，并新增 <code>stop_on_offroad</code> / <code>stop_on_red_light</code>。D1-A 会把速度从停表条件降级为软日志。</div>
+      </section>
+
+      <section id="aux" data-kind="train">
+        <h2>Aux 决策</h2>
+        <div class="grid">
+          <div class="callout ok"><strong>主 baseline</strong><br><code>pred_loss + sigreg + action BC</code>。这保留 LeWM latent prediction 的核心，把 <code>aux</code> 和 <code>pred_aux</code> 设为 0。</div>
+          <div class="callout"><strong>消融 baseline</strong><br><code>pred_loss + sigreg + action BC + aux + pred_aux</code>。只有闭环指标赢，才把它作为驾驶 adapter 报告。</div>
+        </div>
+        <p>判断：你对 aux 的质疑是成立的。V-JEPA/LeWM 这条线强调少监督和 latent dynamics，额外往 latent 上读车辆状态会把故事变成工程增强。下一组先跑 no-aux，aux 只作为对照。</p>
+      </section>
+
+      <section id="evidence" data-kind="all">
+        <h2>已有证据</h2>
+        <table>
+          <tr><th>Run / Eval</th><th>结果</th><th>对 D1 的意义</th></tr>
+          <tr>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_e5-20260522-042925-552fb819"><code>d0_tiny_h3_fs5_delta_predaux_e5</code></a></td>
+            <td>test loss 0.2147；throttle-only 190m pass；200m 约 191.75m off-road。</td>
+            <td>tiny 可以形成短程闭环，但道路边界/长程漂移仍是核心风险。</td>
+          </tr>
+          <tr>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_action_10k-20260522-103256-1a514e1e"><code>d0_tiny_h3_fs5_delta_predaux_action_10k</code></a></td>
+            <td>best val 0.1425；action loss 0.0201；pure action 约 24.84m 后速度违规。</td>
+            <td>action head 有可学信号，D1 需要把速度从主停表条件移开观察真实路面安全性。</td>
+          </tr>
+          <tr>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_action_conflict_10k-20260522-205206-3b40dc67"><code>d0_tiny_h3_fs5_delta_predaux_action_conflict_10k</code></a></td>
+            <td>early stop step 5800；best candidate pure action 25.06m；六个候选 eval 都 0 collision / 0 off-road / 0 red / 0 blocked，全部因 speed_limit_count 失败。</td>
+            <td>旧指标已经把速度放得过重；D1 会重新测道路安全距离。</td>
+          </tr>
+        </table>
+      </section>
+
+      <section id="matrix" data-kind="all">
+        <h2>实验矩阵</h2>
+        <table>
+          <tr><th>顺序</th><th>工件</th><th>目标</th><th>状态</th></tr>
+          <tr><td>1</td><td><code>configs/d1_city_free_drive.yaml</code></td><td>采集 120 episodes / 6 routes / no traffic / green lights。</td><td><span class="tag good">ready</span></td></tr>
+          <tr><td>2</td><td><code>outputs/qc_d1_city_free_drive</code></td><td>逐帧 QC + contact sheet 人工检查。</td><td><span class="tag warn">run next</span></td></tr>
+          <tr><td>3</td><td><code>train_d1_tiny_core_action_noaux_20k.yaml</code></td><td>主 baseline：no-aux tiny action policy。</td><td><span class="tag good">ready</span></td></tr>
+          <tr><td>4</td><td><code>eval_d1_city_free_drive_model_action.yaml</code></td><td>D1-A 500m 安全距离评估。</td><td><span class="tag good">ready</span></td></tr>
+          <tr><td>5</td><td><code>train_d1_tiny_core_action_aux_ablation_20k.yaml</code></td><td>只在 no-aux 有结果后跑 aux 消融。</td><td><span class="tag good">ready</span></td></tr>
+          <tr><td>6</td><td><code>eval_d1_city_free_drive_model_action_lights.yaml</code></td><td>D1-B 真实红绿灯评估。</td><td><span class="tag">conditional</span></td></tr>
+        </table>
+      </section>
+
+      <section id="decoder" data-kind="train">
+        <h2>实验名解码</h2>
+        <table>
+          <tr><th>片段</th><th>含义</th></tr>
+          <tr><td><code>d1</code></td><td>无车城市街道自由行驶任务。</td></tr>
+          <tr><td><code>tiny</code></td><td>ViT tiny，先验证任务和控制接口。</td></tr>
+          <tr><td><code>h3</code></td><td>输入 3 个历史视觉状态。</td></tr>
+          <tr><td><code>fs5</code></td><td>CARLA 20Hz 控制每 5 帧合并，模型步长约 0.25s。</td></tr>
+          <tr><td><code>core_action</code></td><td>latent prediction + SIGReg + action behavior cloning。</td></tr>
+          <tr><td><code>noaux</code></td><td><code>aux_weight: 0.0</code>，不把车辆状态回归作为主损失。</td></tr>
+          <tr><td><code>aux_ablation</code></td><td>同配置加回 <code>aux</code> 和 <code>pred_aux</code>，只用于对照。</td></tr>
+          <tr><td><code>20k</code></td><td>20,000 optimizer steps，上限明显高于旧的几百 step 观察窗口。</td></tr>
+        </table>
+      </section>
+
+      <section id="commands" data-kind="all">
+        <h2>关键命令</h2>
+        <pre><code class="language-bash">PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.carla_collect.collect_dataset \
+  --config configs/d1_city_free_drive.yaml
+
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.dataset_qc.validate_hdf5 \
+  --dataset data/d1_city_free_drive/carla_d1_city_free_drive.h5 \
+  --out-dir outputs/qc_d1_city_free_drive \
+  --strict
+
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.dataset_qc.export_fast_hdf5 \
+  --src data/d1_city_free_drive/carla_d1_city_free_drive.h5 \
+  --dst data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5 \
+  --chunk-frames 256 \
+  --overwrite
+
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_d1_tiny_core_action_noaux_20k.yaml \
+  --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5 \
+  --batch-size 192 \
+  --num-workers 2 \
+  --max-steps 20000 \
+  --output-dir outputs/d1_tiny_h3_fs5_core_action_noaux_20k \
+  --run-name d1_tiny_h3_fs5_core_action_noaux_20k
+
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d1_city_free_drive_model_action.yaml \
+  --output-dir outputs/d1_eval_tiny_core_action_noaux_model_action_500m</code></pre>
+      </section>
+
+      <section id="gates" data-kind="risk">
+        <h2>Go / No-Go</h2>
+        <div class="grid">
+          <div class="callout ok"><strong>Continue</strong><br>D1 数据 strict QC 通过；contact sheet 逐帧样本显示真实沿路行驶；no-aux W&B 从启动开始记录；D1-A Safety IFD 明显超过旧的 25m 边界。</div>
+          <div class="callout"><strong>Pause</strong><br>某些 spawn route 反复被 QC 拒绝；lane offset 随距离单调变大；速度软惩罚很多但安全距离提高，需要先分析 trace 再改损失。</div>
+          <div class="callout bad"><strong>Stop</strong><br>CARLA timing guard 报外部 tick；W&B 缺失；no-aux 和 aux 都在 50m 内出现 primary safety failure。</div>
+          <div class="callout"><strong>Scale</strong><br>tiny 在多 route 上稳定但上限明显受表示能力限制时，再跑 ViT small。</div>
         </div>
       </section>
 
@@ -131,184 +266,15 @@ HTML = r"""<!doctype html>
         <h2>名词速查</h2>
         <table>
           <tr><th>Term</th><th>解释</th></tr>
-          <tr><td><code>CARLA</code></td><td>自动驾驶仿真器，本项目使用它生成相机、车辆控制、车道、碰撞和红灯事件。</td></tr>
-          <tr><td><code>LeWM</code></td><td>LeWorldModel，使用视觉输入学习 latent dynamics 的小世界模型。</td></tr>
-          <tr><td><code>ViT tiny / small</code></td><td>视觉 Transformer 编码器大小；本轮 tiny 和 small 都训练并做了短程闭环评估。</td></tr>
-          <tr><td><code>W&B</code></td><td>Weights & Biases，用于记录训练曲线、配置、summary 和 run 链接。</td></tr>
-          <tr><td><code>QC</code></td><td>Quality Control，逐帧检查缺帧、空白、动作异常、碰撞、离路、红灯和 blocked。</td></tr>
-          <tr><td><code>IFD</code></td><td>Infraction-Free Distance，首次 hard infraction 前的行驶距离，越高越好。</td></tr>
-          <tr><td><code>Mini Driving Score</code></td><td>路线完成度乘违规惩罚，用来防止只看是否开到终点。</td></tr>
-          <tr><td><code>speed gate</code></td><td>设置 <code>speed_limit_kmh</code> 后，持续超速会计入 hard infraction，并影响 IFD、Mini Score 和 success rate。</td></tr>
-          <tr><td><code>CEM64</code></td><td>Cross-Entropy Method 规划器，64 个动作样本、2 次迭代、horizon 4，用于短程 sanity eval。</td></tr>
-          <tr><td><code>throttle-only</code></td><td>当前有效简化目标：只允许模型选择油门，steer/brake 固定为 0，用来验证最小闭环能力。</td></tr>
-          <tr><td><code>delta-progress</code></td><td>把 route progress 从绝对里程改成相邻样本的前进增量，避免模型把“已经走了多远”当作静态标签背下来。</td></tr>
-          <tr><td><code>pred_aux</code></td><td>从预测 latent 上直接回归速度、油门、转向、制动、路线增量等辅助状态，迫使预测状态对控制规划有用。</td></tr>
-          <tr><td><code>pred_aux_loss</code></td><td>预测 latent 的辅助回归损失，越低表示模型预测的下一步 latent 更包含驾驶相关信息。</td></tr>
-          <tr><td><code>action prior</code></td><td>从 latent 直接预测 5 帧动作块，用 behavior cloning 约束模型动作分布；不是替代 LeWM 主干。</td></tr>
-          <tr><td><code>max_steps</code></td><td>按 optimizer update 设训练预算，当前 action-prior 主实验为 10,000 steps。</td></tr>
-          <tr><td><code>steering-safe</code></td><td>极窄转向范围的闭环配置，目标是恢复安全转向；当前 tiny/small delta-pred-aux 都失败。</td></tr>
-          <tr><td><code>sim_delta_s</code></td><td>相邻控制 tick 的 CARLA 仿真时间差；过大说明有外部客户端推进世界，评估应判无效。</td></tr>
-          <tr><td><code>D0</code></td><td>单车、白天、固定简化路线、强约束质量门控，是第一阶段最简单数据分布。</td></tr>
+          <tr><td><code>Safety IFD</code></td><td>安全优先的 infraction-free distance；D1-A 中不因普通超速提前停表。</td></tr>
+          <tr><td><code>primary safety failure</code></td><td>collision、off-road / roadside departure、blocked。</td></tr>
+          <tr><td><code>red-light</code></td><td>D1-B 开启真实信号灯后纳入 hard failure。</td></tr>
+          <tr><td><code>speed soft penalty</code></td><td>速度违规计数和扣分，但不主导第一轮 D1 安全距离。</td></tr>
+          <tr><td><code>aux</code></td><td>从当前 latent 读车辆速度、路程、车道偏移等状态的辅助头；下一组只做消融。</td></tr>
+          <tr><td><code>pred_aux</code></td><td>从预测 latent 读同一批状态；旧 D0 曾用于让预测 latent 更贴近控制变量。</td></tr>
+          <tr><td><code>action BC</code></td><td>从 latent 预测专家动作块，用于直接闭环控制。</td></tr>
+          <tr><td><code>W&B</code></td><td>Weights & Biases；所有认真训练从 process start 开始在线记录。</td></tr>
         </table>
-      </section>
-
-      <section id="decoder" data-kind="train">
-        <h2>实验名解码</h2>
-        <p><code>d0_tiny_h3_fs5_delta_predaux_e5</code>：D0 简化路线、ViT tiny、3 帧历史、5 帧合并一个动作步、delta-progress 目标、predicted-aux 辅助头、训练 5 epoch。</p>
-        <table>
-          <tr><th>片段</th><th>含义</th></tr>
-          <tr><td><code>d0</code></td><td>单车低速白天简化场景。</td></tr>
-          <tr><td><code>tiny / small</code></td><td>ViT encoder 大小。</td></tr>
-          <tr><td><code>h3</code></td><td>模型输入 3 个历史视觉状态。</td></tr>
-          <tr><td><code>fs5</code></td><td>CARLA 20Hz 控制每 5 帧合并，模型步长约 0.25s。</td></tr>
-          <tr><td><code>fast</code></td><td>使用未压缩/chunked HDF5，避免训练随机读取卡住。</td></tr>
-          <tr><td><code>delta</code></td><td>route progress 使用相邻样本增量，作为当前默认目标。</td></tr>
-          <tr><td><code>predaux</code></td><td>训练预测 latent 上的辅助驾驶状态回归头。</td></tr>
-          <tr><td><code>e5</code></td><td>训练 5 epoch，用于第一轮可比实验。</td></tr>
-        </table>
-      </section>
-
-      <section id="data" data-kind="data">
-        <h2>数据证据</h2>
-        <table>
-          <tr><th>Dataset</th><th>Episodes</th><th>Frames</th><th>QC</th><th>Hard infractions</th></tr>
-          <tr><td><code>D0-smoke</code></td><td>20</td><td>12,000</td><td><span class="tag good">pass</span></td><td>0 collision / 0 off-road / 0 red / 0 blocked</td></tr>
-          <tr><td><code>D0-train</code></td><td>80</td><td>48,000</td><td><span class="tag good">pass</span></td><td>0 collision / 0 off-road / 0 red / 0 blocked</td></tr>
-        </table>
-        <div class="callout ok">读法：这张表证明 D0 训练数据本身足够干净，可以进入模型训练。它不能证明模型闭环会开车。</div>
-      </section>
-
-      <section id="wandb" data-kind="train">
-        <h2>W&B 证据</h2>
-        <table>
-          <tr><th>Run</th><th>模型</th><th>Batch</th><th>Val/Test</th><th>曲线读法</th></tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_fast_e5-20260522-014214-db1cb3e1"><code>d0_tiny_h3_fs5_fast_e5</code></a><br>历史 absolute-progress tiny、D0、fast HDF5、5 epoch。</td>
-            <td>ViT tiny</td><td>192</td><td>val 2.9568<br>test 2.9620<br>pred 0.7015</td><td><div class="bar"><span style="width: 38%"></span></div>离线 loss 有下降，但闭环仍离路。</td>
-          </tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_fast_e5-20260522-024715-2f674d5e"><code>d0_small_h3_fs5_fast_e5</code></a><br>历史 absolute-progress small、D0、fast HDF5、5 epoch。</td>
-            <td>ViT small</td><td>128</td><td>val 1.1281<br>test 1.1324<br>pred 0.5269</td><td><div class="bar"><span style="width: 75%"></span></div>离线 loss 更好，但未突破 200m throttle-only 边界。</td>
-          </tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_e5-20260522-042925-552fb819"><code>d0_tiny_h3_fs5_delta_predaux_e5</code></a><br>当前 tiny，delta-progress + predicted-aux，5 epoch。</td>
-            <td>ViT tiny</td><td>192</td><td>val 0.2156<br>test 0.2147<br>pred 0.0625<br>pred-aux 0.1025</td><td><div class="bar"><span style="width: 95%"></span></div>离线学习显著改善；闭环扩展到 190m，但 200m 未通过。</td>
-          </tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_small_h3_fs5_delta_predaux_e5-20260522-054348-da4e9fd5"><code>d0_small_h3_fs5_delta_predaux_e5</code></a><br>当前 small，delta-progress + predicted-aux，已完成。</td>
-            <td>ViT small</td><td>96</td><td>val 0.3311<br>test 0.3300<br>pred 0.1243<br>pred-aux 0.1225</td><td><div class="bar"><span style="width: 65%"></span></div>best 来自 epoch 1；离线不如 tiny，闭环也没有突破 200m。</td>
-          </tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_action_10k-20260522-103256-1a514e1e"><code>d0_tiny_h3_fs5_delta_predaux_action_10k</code></a><br>tiny，delta-progress + predicted-aux + action-prior，10,000 steps。</td>
-            <td>ViT tiny</td><td>192</td><td>best val 0.1425 @9843<br>test 0.1400<br>action 0.0201<br>pred-action 0.0116</td><td><div class="bar"><span style="width: 98%"></span></div>离线 action loss 明显可学；闭环瓶颈转为动作解码和速度/刹车策略。</td>
-          </tr>
-        </table>
-        <div class="callout">当前结论：W&B 曲线和 test loss 只能证明离线拟合变好。action-prior 让 action head 可用，但 pure action 仍超速；200m 成果来自 action head + lane/speed governor 的 hybrid 配置。</div>
-      </section>
-
-      <section id="eval" data-kind="eval">
-        <h2>闭环评估</h2>
-        <table>
-          <tr><th>Policy</th><th>配置</th><th>IFD</th><th>Mini Score</th><th>结论</th></tr>
-          <tr><td>Autopilot baseline</td><td>2 episodes, 100m cap</td><td>100.00m</td><td>100.0</td><td><span class="tag good">pass</span> 环境和指标可信。</td></tr>
-          <tr><td>historical tiny checkpoint</td><td>150m cap, isolated port 2100, throttle-only</td><td>150.00m</td><td>100.0</td><td><span class="tag good">pass</span> 历史 sanity pass。</td></tr>
-          <tr><td>historical small checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.87m</td><td>70.0</td><td><span class="tag warn">boundary</span> 更大 ViT 没有解决边界。</td></tr>
-          <tr><td>tiny delta/pred-aux checkpoint</td><td>150m cap, isolated port 2100, throttle-only</td><td>150.00m</td><td>100.0</td><td><span class="tag good">pass</span> 当前最小有效闭环结果。</td></tr>
-          <tr><td>tiny delta/pred-aux checkpoint</td><td>190m cap, isolated port 2100, throttle-only</td><td>190.00m</td><td>100.0</td><td><span class="tag good">pass</span> 当前有效主指标。</td></tr>
-          <tr><td>tiny delta/pred-aux checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.75m</td><td>70.0</td><td><span class="tag warn">boundary</span> 接近 200m 时 off-road。</td></tr>
-          <tr><td>tiny delta/pred-aux checkpoint</td><td>150m cap, isolated port 2100, steering-safe</td><td>107.63m</td><td>70.0</td><td><span class="tag bad">fail</span> 转向仍会推向右侧路缘。</td></tr>
-          <tr><td>small delta/pred-aux checkpoint</td><td>190m cap, isolated port 2100, throttle-only</td><td>190.00m</td><td>100.0</td><td><span class="tag good">pass</span> 和 tiny 持平。</td></tr>
-          <tr><td>small delta/pred-aux checkpoint</td><td>200m cap, isolated port 2100, throttle-only</td><td>191.67m</td><td>70.0</td><td><span class="tag warn">boundary</span> 没有突破 tiny 边界。</td></tr>
-          <tr><td>small delta/pred-aux checkpoint</td><td>150m cap, isolated port 2100, steering-safe</td><td>103.42m</td><td>70.0</td><td><span class="tag bad">fail</span> steering-safe 更早离路。</td></tr>
-          <tr><td>lane-keep controller</td><td>200m cap, isolated port 2100, speed gate 35km/h</td><td>200.00m</td><td>100.0</td><td><span class="tag good">pass</span> route 和指标可通过。</td></tr>
-          <tr><td>tiny delta + lane-keep steer</td><td>200m cap, speed gate 35km/h, no speed governor</td><td>24.17m</td><td>10.27</td><td><span class="tag bad">fail</span> 模型油门导致超速。</td></tr>
-          <tr><td>tiny delta + lane/speed governor</td><td>200m cap, speed gate 35km/h</td><td>200.00m</td><td>100.0</td><td><span class="tag good">pass</span> governed hybrid sanity pass。</td></tr>
-          <tr><td>action-prior raw model_action</td><td>200m cap, speed gate 35km/h, no throttle/brake sanitization</td><td>0.003m</td><td>0.001</td><td><span class="tag bad">fail</span> 油门和刹车同时输出，原地 blocked。</td></tr>
-          <tr><td>action-prior model_action</td><td>200m cap, throttle/brake exclusive</td><td>24.84m</td><td>10.56</td><td><span class="tag bad">fail</span> 起步成功，但 pure action 控速失败。</td></tr>
-          <tr><td>action-prior + lane-keep</td><td>200m cap, throttle/brake exclusive</td><td>157.69m</td><td>63.08</td><td><span class="tag warn">partial</span> 无碰撞/离路/红灯/超速，尾段被模型刹停。</td></tr>
-          <tr><td>action-prior + lane/speed governor</td><td>200m cap, exclusive + brake release below overspeed</td><td>200.00m</td><td>100.0</td><td><span class="tag good">pass</span> governed hybrid 通过，max speed 6.38m/s，max lane offset 0.072m。</td></tr>
-        </table>
-        <div class="callout">有效性说明：早期 port 2000 model eval 被外部 HIL client tick 污染；当前 evaluator 已写 action/timing/lane/speed trace，并在 `sim_delta_s` 过大时 fail。严格 fair gate 应使用 speed-limit-aware 配置。</div>
-      </section>
-
-      <section id="phases" data-kind="all">
-        <h2>阶段计划</h2>
-        <details open data-kind="data"><summary>Phase 0-1：环境、采集、逐帧 QC <span class="tag good">done</span></summary>
-          <p>目标：建立 GitHub repo、CARLA 0.9.16 采集、逐帧 QC 和 contact sheet 人工核查。</p>
-          <p>结果：D0-smoke 和 D0-train 都 strict pass；40s 版本因长尾离路/碰撞被放弃，30s 简化数据进入训练。</p>
-        </details>
-        <details open data-kind="train"><summary>Phase 2-3：tiny / small 训练 <span class="tag good">done</span></summary>
-          <p>目标：先 tiny，再在 tiny 闭环不理想后尝试 small；全程 W&B 记录。</p>
-          <p>结果：tiny delta/pred-aux 离线 loss 最好并通过 190m throttle-only；small best 来自 epoch 1，离线和闭环都没有超过 tiny。</p>
-        </details>
-        <details open data-kind="eval"><summary>Phase 4：简化闭环 sanity <span class="tag good">hybrid 200m pass</span></summary>
-          <p>目标：用 IFD 和 Mini Driving Score 检查模型能否短程不出错。</p>
-          <p>结果：隔离 CARLA + throttle-only 下 tiny/small delta-pred-aux 都 190m pass；200m 在约 191.7m off-road。speed-gated model-lane-keep 无 governor 时 24.17m 因超速失败；带 lane/speed governor 后 200m pass。action-prior 复测确认 200m 可以由 action head + governor 完成，但 pure action 仍没有通过速度规则。</p>
-        </details>
-        <details open data-kind="train"><summary>Phase 4.5：Action-prior 10k <span class="tag good">done</span></summary>
-          <p>目标：在 tiny LeWM latent 上增加 action head，训练 10,000 optimizer steps，观察 action_loss、pred_action_loss 与 speed-gated closed-loop 是否同步改善。</p>
-          <p>结果：best val 0.1425，test action loss 0.0201；原始 action policy 因 throttle/brake 冲突原地 blocked。加入互斥控制后 pure action 起步但超速，action+lane-keep 157.69m 后 blocked；加入 speed governor brake-release 后 200m pass。下一步是把互斥/速度约束移回训练目标，而不是继续只靠评估侧规则。</p>
-        </details>
-        <details data-kind="risk"><summary>Phase 5：长程 500m / D1 低密交通 <span class="tag">not ready</span></summary>
-          <p>进入条件：200m speed-gated model policy pass，并且 steering-enabled 目标至少 150m IFD 且无 hard infraction。</p>
-        </details>
-      </section>
-
-      <section id="commands" data-kind="all">
-        <h2>关键命令</h2>
-        <pre><code class="language-bash">python -m carla_lewm_drive.dataset_qc.export_fast_hdf5 \
-  --src data/d0_train/carla_d0_train.h5 \
-  --dst data/d0_train/carla_d0_train_fast.h5 \
-  --chunk-frames 256 --overwrite
-
-python -m carla_lewm_drive.driving_lewm.train \
-  --config configs/train_tiny.yaml \
-  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
-  --batch-size 192 --num-workers 2 --max-epochs 5 \
-  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_e5 \
-  --run-name d0_tiny_h3_fs5_delta_predaux_e5
-
-python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d0_throttle_only.yaml \
-  --checkpoint outputs/d0_tiny_h3_fs5_delta_predaux_e5/best.pt \
-  --route-cap-m 190 \
-  --output-dir outputs/d0_eval_tiny_delta_predaux_throttle_only_190m
-
-python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d0_model_lane_keep_governed.yaml \
-  --output-dir outputs/d0_eval_tiny_model_lane_keep_governed_200m_v1
-
-python -m carla_lewm_drive.driving_lewm.train \
-  --config configs/train_tiny_action_prior_10k.yaml \
-  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
-  --batch-size 192 --num-workers 2 --max-steps 10000 \
-  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_10k \
-  --run-name d0_tiny_h3_fs5_delta_predaux_action_10k
-
-python -m carla_lewm_drive.driving_lewm.train \
-  --config configs/train_tiny_action_conflict_10k.yaml \
-  --dataset-path data/d0_train/carla_d0_train_fast.h5 \
-  --batch-size 192 --num-workers 2 --max-steps 10000 \
-  --output-dir outputs/d0_tiny_h3_fs5_delta_predaux_action_conflict_10k \
-  --run-name d0_tiny_h3_fs5_delta_predaux_action_conflict_10k
-
-python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d0_model_action_speedgate.yaml \
-  --output-dir outputs/d0_eval_tiny_model_action_speedgate_200m_exclusive_v1
-
-python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d0_model_action_lane_keep_speedgate.yaml \
-  --output-dir outputs/d0_eval_tiny_model_action_lane_keep_speedgate_200m_brake_release_v2</code></pre>
-      </section>
-
-      <section id="gates" data-kind="risk">
-        <h2>Go / No-Go</h2>
-        <div class="grid">
-          <div class="callout ok"><strong>Continue</strong><br>把 throttle/brake 互斥和速度合规约束移入训练目标，优先训练 action-conflict/speed-aware tiny 版本。</div>
-          <div class="callout"><strong>Pause</strong><br>如果 pure action 继续只靠评估侧 governor 才能通过，先诊断动作表示和专家分布，不扩大模型。</div>
-          <div class="callout bad"><strong>Stop</strong><br>W&B 未启动、QC 非严格通过、autopilot baseline 失败、或 `sim_delta_s` 出现外部 tick 跳变。</div>
-          <div class="callout"><strong>Scale</strong><br>只有 steering-enabled 目标呈 capacity-limited 时，才继续跑更大 ViT。</div>
-        </div>
       </section>
     </main>
   </div>
@@ -321,8 +287,7 @@ python -m carla_lewm_drive.closed_loop_eval.evaluate \
 
     function clearMarks() {
       content.querySelectorAll('mark.search-hit').forEach(mark => {
-        const text = document.createTextNode(mark.textContent);
-        mark.replaceWith(text);
+        mark.replaceWith(document.createTextNode(mark.textContent));
       });
       content.normalize();
     }
@@ -371,7 +336,7 @@ python -m carla_lewm_drive.closed_loop_eval.evaluate \
       if (current >= 0) hits[current].classList.remove('current-hit');
       current = (current + delta + hits.length) % hits.length;
       hits[current].classList.add('current-hit');
-      hits[current].scrollIntoView({behavior: 'smooth', block: 'center'});
+      hits[current].scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     let timer = null;
     search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(doSearch, 100); });

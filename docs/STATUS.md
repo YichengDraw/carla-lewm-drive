@@ -10,7 +10,7 @@ The current valid model-only success claim is intentionally narrow: on an isolat
 
 The first 200m pass is a governed hybrid sanity result: tiny LeWM stays in the loop for throttle/brake planning, while lane keeping and speed limiting are guarded by deterministic feedback. Without the speed governor, the same hybrid fails the fair speed-gated metric at 24.17m from speeding.
 
-The action-prior branch has now run for 10,000 optimizer steps. It improved offline action prediction, but closed-loop control still needs action decoding constraints: raw action policy was blocked at about 0.003m, throttle/brake exclusivity lifted pure action to 24.84m before speed violation, and action+lane-keep reached 157.69m before blocked. With throttle/brake exclusivity plus speed-governor brake release, action+lane-keep passed the 200m speed-gated route. This is a governed hybrid success, not a pure action-policy success.
+The action-prior branch has now run for 10,000 optimizer steps. It improved offline action prediction, but closed-loop control still needs action decoding constraints: raw action policy was blocked at about 0.003m, throttle/brake exclusivity lifted pure action to 24.84m before speed violation, and action+lane-keep reached 157.69m before blocked. With throttle/brake exclusivity plus speed-governor brake release, action+lane-keep passed the 200m speed-gated route. This is a governed hybrid success, and the next gate is now a clearer D1 city free-drive task where road safety distance is primary and speed is tertiary.
 
 ## Repository And Environment
 
@@ -99,10 +99,10 @@ Interpretation:
 
 ## Current Next Gate
 
-The active next gate is to move the action constraints from evaluation-time rules into the model/training objective:
+The active next gate is D1 no-traffic city free-drive:
 
-1. Keep delta-progress and predicted-aux as the current default objective.
-2. Add a conflict-aware action loss or action parameterization that cannot output throttle and brake together.
-3. Add a speed-aware action term or filtered expert target so pure action is not rewarded for persistent overspeed.
-4. Re-run tiny before scaling ViT.
-5. Only attempt 500m after pure or minimally-governed action passes 200m without off-road, blocked, or speed-limit infractions.
+1. Collect `D1-city-free-drive-no-traffic` with six fixed Town03 spawn indices, no vehicles, no walkers, clear weather, and green lights for the first pass.
+2. Evaluate by distance before primary road-safety failures: collision, off-road / roadside departure, or blocked.
+3. Add real traffic lights as D1-B after D1-A is stable; keep speed-limit violations as logged soft penalties during the first D1 attempt.
+4. Train the next tiny baseline with `pred_loss + sigreg + action BC`, setting `aux_weight: 0.0` and `pred_aux_weight: 0.0`.
+5. Run the `aux + pred_aux` version only as an ablation and report it as an engineering adapter if it wins closed-loop.
