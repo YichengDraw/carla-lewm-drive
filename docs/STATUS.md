@@ -12,7 +12,7 @@ The first 200m pass is a governed hybrid sanity result: tiny LeWM stays in the l
 
 The action-prior branch has now run for 10,000 optimizer steps. It improved offline action prediction, but closed-loop control still needs action decoding constraints: raw action policy was blocked at about 0.003m, throttle/brake exclusivity lifted pure action to 24.84m before speed violation, and action+lane-keep reached 157.69m before blocked. With throttle/brake exclusivity plus speed-governor brake release, action+lane-keep passed the 200m speed-gated route. This is a governed hybrid success, and the next gate is now a clearer D1 city free-drive task where road safety distance is primary and speed is tertiary.
 
-D1 is now active. The first D1 dataset has `48,000` frames across `60` episodes and six Town03 spawn routes, strict QC passed with zero collision/off-road/red-light/blocked frames, and the sampled contact sheet was inspected before training. The active main training run is `d1_tiny_h3_fs5_core_action_noaux_20k` with `use_aux_head: false`; at the latest check it had passed step `4700`, kept `aux_loss=0` and `pred_aux_loss=0`, and the total-validation best remained `0.15595` at epoch `27` / step `3942`. Because D1-A uses `policy_action(...)`, a `best_action.pt` checkpoint is also maintained; current action-best is epoch `31` / step `4526` with `val/action_loss=0.003202`. Remote `d1_best_action_watch` and `d1_auto_eval_noaux` tmux watchers are armed; after training exits they will run D1-A on both total-best and action-best checkpoints.
+D1 is now active. The first D1 dataset has `48,000` frames across `60` episodes and six Town03 spawn routes, strict QC passed with zero collision/off-road/red-light/blocked frames, and the sampled contact sheet was inspected before training. The active main training run is `d1_tiny_h3_fs5_core_action_noaux_20k` with `use_aux_head: false`; at the latest check it had reached step `8400`, kept `aux_loss=0` and `pred_aux_loss=0`, and total-validation best was `0.13641` at epoch `40` / step `5840`. Because D1-A uses `policy_action(...)`, a `best_action.pt` checkpoint is also maintained; current action-best is epoch `52` / step `7592` with `val/action_loss=0.002903`. Remote `d1_best_action_watch` and `d1_auto_eval_noaux` tmux watchers are armed; after training exits they will run D1-A on both total-best and action-best checkpoints.
 
 ## Repository And Environment
 
@@ -105,6 +105,8 @@ The active next gate is D1 no-traffic city free-drive:
 
 1. Finish or stop-on-plateau `D1-city-free-drive-no-traffic` no-aux training with W&B and local CSV/checkpoints intact.
 2. Evaluate by distance before primary road-safety failures: collision, off-road / roadside departure, or blocked.
-3. Add real traffic lights as D1-B after D1-A is stable; keep speed-limit violations as logged soft penalties during the first D1 attempt.
-4. Add commanded lane changes only after route-command labels exist; D1-A already covers natural left/right road geometry through turns and intersections.
-5. Run the `aux + pred_aux` version only as an ablation and report it as an engineering adapter if it wins closed-loop.
+3. If D1-A has a credible closed-loop signal, run a D1-W mixed-weather branch before adding vehicles: `ClearNoon`, `CloudyNoon`, `WetNoon`, and `SoftRainNoon`, still with no traffic and green lights.
+4. Add real traffic lights as D1-B after D1-A and the first weather robustness pass are understood; keep speed-limit violations as logged soft penalties during the first D1 attempt.
+5. Add commanded lane changes only after route-command labels exist; D1-A already covers natural left/right road geometry through turns and intersections.
+6. Run the `aux + pred_aux` version only as an ablation and report it as an engineering adapter if it wins closed-loop.
+7. Try ViT small only after tiny succeeds enough to show a capacity or visual-robustness limit; do not use model size to cover up a failed task definition or control interface.

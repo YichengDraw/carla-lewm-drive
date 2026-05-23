@@ -48,6 +48,20 @@ Purpose: add traffic-light rule following after D1-A is stable.
 - Red-light violation stops the episode and is reported separately.
 - Speed remains tertiary.
 
+### D1-W: City Free-Drive, No Traffic, Mixed Weather
+
+Purpose: test whether the learned road-following behavior is robust to visual shifts rather than only memorizing `ClearNoon`.
+
+Run this only after D1-A has a credible closed-loop result. The first weather-mix pilot should keep the same task and routes, and vary only weather:
+
+- Candidate weather presets: `ClearNoon`, `CloudyNoon`, `WetNoon`, `SoftRainNoon`.
+- Traffic: still `vehicles: 0`, `walkers: 0`.
+- Lights: keep `force_green_lights: true` for the first weather pass.
+- Scale: start with the same total frame budget as D1-A by splitting episodes across weather presets; expand only if QC and closed-loop results justify it.
+- Evaluation: report per-weather Safety IFD, not only aggregate mean. A model that succeeds only in one weather is not robust.
+
+If D1-W succeeds, then add D1-B real lights on the successful weather distribution. If D1-W fails while D1-A succeeds, prioritize data diversity and augmentation before increasing model size.
+
 ### Later D2
 
 Add other vehicles only after D1-A and D1-B are reproducible. The first vehicle setting should use sparse traffic and fixed seeds, not dense urban traffic.
@@ -160,7 +174,16 @@ Training requirements:
 - Local CSV/JSON/checkpoints preserved.
 - Batch probe first if the D1 dataset shape or GPU memory changes.
 - Monitor at least every 10 minutes.
-- Do not scale to small ViT until tiny shows a capacity-looking failure rather than a task/metric/control-interface failure.
+- Do not scale to small ViT until tiny succeeds on D1-A or shows a capacity-looking failure rather than a task/metric/control-interface failure.
+
+### Model-Size Escalation
+
+Run ViT small only after the task has earned it:
+
+- If tiny D1-A fails before `50m` by primary safety failure, do not scale first; fix task conditioning, data, or action decoding.
+- If tiny D1-A reaches a credible distance but is inconsistent across routes, collect/weight missing route and recovery data before scaling.
+- If tiny D1-A is stable and D1-W exposes visual robustness failures, try weather-mix data first, then ViT small.
+- If tiny D1-A and D1-W are both stable but the control remains visibly underfit or offline action loss plateaus high, run ViT small with the same no-aux objective and the same D1-A/D1-W eval suite.
 
 ## Evaluation Plan
 
@@ -194,6 +217,12 @@ Continue from D1-A to D1-B if:
 - closed-loop D1-A mean Safety IFD is meaningfully above the old 25m speed-failure boundary;
 - contact sheets show road-following rather than accidental straight-line survival.
 
+Continue from D1-A to D1-W if:
+
+- D1-A Safety IFD is above the D0 speed-failure boundary by a clear margin;
+- at least several routes survive long enough to show turns and lane keeping, not only straight-road behavior;
+- total-best and action-best checkpoints agree qualitatively, or the action-best clearly wins closed-loop.
+
 Pause if:
 
 - route selection produces many QC rejections;
@@ -217,4 +246,5 @@ The next likely fixes are task-conditioning and data, not model size:
 3. Split lateral and longitudinal heads so steering can be judged independently from throttle.
 4. Add commanded lane-change episodes after route commands work on fixed turns.
 5. Add sparse red-light examples only after D1-A is stable.
-6. Try ViT small only after the above checks show tiny is under-capacity.
+6. Add multi-weather data only after the single-weather task has a real closed-loop signal.
+7. Try ViT small only after the above checks show tiny is under-capacity.

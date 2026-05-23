@@ -105,6 +105,7 @@ HTML = r"""<!doctype html>
       <a href="#live">实时状态</a>
       <a href="#evidence">已有证据</a>
       <a href="#matrix">实验矩阵</a>
+      <a href="#scaleout">扩展路线</a>
       <a href="#decoder">实验名解码</a>
       <a href="#commands">命令</a>
       <a href="#gates">Go / No-Go</a>
@@ -132,13 +133,13 @@ HTML = r"""<!doctype html>
           <div class="metric"><span>D1 数据</span><strong>48k</strong><span>60 episodes，strict QC pass，contact sheet 已检查</span></div>
           <div class="metric"><span>Batch probe</span><strong>256</strong><span>RTX 5090 峰值 24.388GB，正式 run 用 workers=4</span></div>
           <div class="metric"><span>Clean no-aux</span><strong>running</strong><span><code>use_aux_head: false</code>，aux/pred_aux 全程 0</span></div>
-          <div class="metric"><span>Best val</span><strong>0.15595</strong><span>epoch 27 / step 3942，仍在训练</span></div>
+          <div class="metric"><span>Best val</span><strong>0.13641</strong><span>epoch 40 / step 5840，仍在训练</span></div>
           <div class="metric"><span>Monitor</span><strong>5min</strong><span><code>outputs/remote_logs/d1_noaux_watch.log</code></span></div>
-          <div class="metric"><span>Best action</span><strong>0.003202</strong><span>epoch 31 / step 4526，已保存 <code>best_action.pt</code></span></div>
+          <div class="metric"><span>Best action</span><strong>0.002903</strong><span>epoch 52 / step 7592，已保存 <code>best_action.pt</code></span></div>
           <div class="metric"><span>Auto eval</span><strong>armed</strong><span>训练后评估 total-best 和 action-best</span></div>
         </div>
         <p>当前 W&B run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7"><code>d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7</code></a>。</p>
-        <div class="callout ok">截至 2026-05-23 15:24 Asia/Shanghai，训练进入 epoch 33 附近；total validation best 仍是 epoch 27 / step 3942 的 0.15595，最近 5 次 validation 没有刷新。action-best 已推进到 epoch 31 / step 4526，<code>val/action_loss=0.003202</code>。aux/pred_aux 指标全程为 0，确认主 run 是真正 no-aux。<code>d1_best_action_watch</code> 会继续保存 action-best；<code>d1_auto_eval_noaux</code> 会在训练 tmux 结束后启动 CARLA 2100，并分别运行 total-best 与 action-best 的 D1-A。</div>
+        <div class="callout ok">截至 2026-05-23 18:01 Asia/Shanghai，训练到 step 8400；total validation best 已推进到 epoch 40 / step 5840 的 0.13641，之后已有 17 次 validation 未刷新，接近 patience=20。action-best 是 epoch 52 / step 7592，<code>val/action_loss=0.002903</code>。aux/pred_aux 指标全程为 0，确认主 run 是真正 no-aux。<code>d1_best_action_watch</code> 会继续保存 action-best；<code>d1_auto_eval_noaux</code> 会在训练 tmux 结束后启动 CARLA 2100，并分别运行 total-best 与 action-best 的 D1-A。</div>
       </section>
 
       <section id="task" data-kind="task">
@@ -219,9 +220,21 @@ HTML = r"""<!doctype html>
           <tr><td>2</td><td><code>outputs/qc_d1_city_free_drive</code></td><td>逐帧 QC + contact sheet 人工检查。</td><td><span class="tag good">done</span></td></tr>
           <tr><td>3</td><td><code>train_d1_tiny_core_action_noaux_20k.yaml</code></td><td>主 baseline：no-aux tiny action policy。</td><td><span class="tag warn">running</span></td></tr>
           <tr><td>4</td><td><code>eval_d1_city_free_drive_model_action.yaml</code></td><td>D1-A 500m 安全距离评估。</td><td><span class="tag good">ready</span></td></tr>
-          <tr><td>5</td><td><code>train_d1_tiny_core_action_aux_ablation_20k.yaml</code></td><td>只在 no-aux 有结果后跑 aux 消融。</td><td><span class="tag good">ready</span></td></tr>
-          <tr><td>6</td><td><code>eval_d1_city_free_drive_model_action_lights.yaml</code></td><td>D1-B 真实红绿灯评估。</td><td><span class="tag">conditional</span></td></tr>
+          <tr><td>5</td><td><code>D1-W weather mix</code></td><td>D1-A 成立后，用 Clear/Cloudy/Wet/SoftRain 多天气混训并按天气分开评估。</td><td><span class="tag">conditional</span></td></tr>
+          <tr><td>6</td><td><code>train_d1_tiny_core_action_aux_ablation_20k.yaml</code></td><td>只在 no-aux 有结果后跑 aux 消融。</td><td><span class="tag good">ready</span></td></tr>
+          <tr><td>7</td><td><code>eval_d1_city_free_drive_model_action_lights.yaml</code></td><td>D1-B 真实红绿灯评估。</td><td><span class="tag">conditional</span></td></tr>
+          <tr><td>8</td><td><code>ViT small</code></td><td>tiny 已有闭环信号后再放大；保持同一 no-aux 目标和同一评估套件。</td><td><span class="tag">conditional</span></td></tr>
         </table>
+      </section>
+
+      <section id="scaleout" data-kind="all">
+        <h2>扩展路线</h2>
+        <div class="grid">
+          <div class="callout ok"><strong>先证明小范围</strong><br>当前只看 D1-A：无车、绿灯、ClearNoon、6 routes。若这里不能稳定超过旧的 25m 速度失败边界，先修任务、数据、动作解码。</div>
+          <div class="callout"><strong>再做天气鲁棒</strong><br>D1-A 成功后做 D1-W：<code>ClearNoon</code>、<code>CloudyNoon</code>、<code>WetNoon</code>、<code>SoftRainNoon</code>，总 frame budget 先不扩大，按天气报告 Safety IFD。</div>
+          <div class="callout"><strong>最后放大模型</strong><br>ViT small 只在 tiny 已经有闭环信号、并且失败像 capacity/visual robustness，而不是 metric 或控制接口错误时启动。</div>
+          <div class="callout"><strong>仍不加车</strong><br>车辆、行人、命令化变道进入 D2/D1-C；多天气阶段继续保持 no traffic，把变量隔离清楚。</div>
+        </div>
       </section>
 
       <section id="decoder" data-kind="train">
@@ -275,7 +288,7 @@ PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
           <div class="callout ok"><strong>Continue</strong><br>D1 数据 strict QC 通过；contact sheet 逐帧样本显示真实沿路行驶；no-aux W&B 从启动开始记录；D1-A Safety IFD 明显超过旧的 25m 边界。</div>
           <div class="callout"><strong>Pause</strong><br>某些 spawn route 反复被 QC 拒绝；lane offset 随距离单调变大；速度软惩罚很多但安全距离提高，需要先分析 trace 再改损失。</div>
           <div class="callout bad"><strong>Stop</strong><br>CARLA timing guard 报外部 tick；W&B 缺失；no-aux 和 aux 都在 50m 内出现 primary safety failure。</div>
-          <div class="callout"><strong>Scale</strong><br>tiny 在多 route 上稳定但上限明显受表示能力限制时，再跑 ViT small。</div>
+          <div class="callout"><strong>Scale</strong><br>D1-A 成功后先跑多天气混训；tiny 在多 route / 多天气上稳定但明显受表示能力限制时，再跑 ViT small。</div>
         </div>
       </section>
 
@@ -291,6 +304,7 @@ PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
           <tr><td><code>pred_aux</code></td><td>从预测 latent 读同一批状态；旧 D0 曾用于让预测 latent 更贴近控制变量。</td></tr>
           <tr><td><code>action BC</code></td><td>从 latent 预测专家动作块，用于直接闭环控制。</td></tr>
           <tr><td><code>W&B</code></td><td>Weights & Biases；所有认真训练从 process start 开始在线记录。</td></tr>
+          <tr><td><code>D1-W</code></td><td>无车、绿灯、同 routes 的多天气鲁棒性阶段；只在 D1-A 有闭环信号后启动。</td></tr>
         </table>
       </section>
     </main>
