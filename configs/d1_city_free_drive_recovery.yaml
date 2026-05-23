@@ -1,0 +1,67 @@
+scenario:
+  label: D1-city-free-drive-recovery-lanekeep
+  description: No-traffic Town03 recovery dataset with lane-keep teacher and initial lateral/yaw perturbations.
+  carla_version: 0.9.16
+  host: 127.0.0.1
+  port: 2100
+  timeout_s: 30.0
+  town: Town03
+  fixed_delta_seconds: 0.05
+  synchronous_mode: true
+  traffic_manager_port: 8100
+  traffic_manager_seed: 20260523
+  vehicles: 0
+  walkers: 0
+  weather: ClearNoon
+  force_green_lights: true
+  record_carla_log: false
+  cleanup_after_success: true
+  teacher_policy: lane_keep
+  spawn_point_indices: [3, 4, 6, 10, 12]
+  episodes: 45
+  episode_seconds: 20.0
+  target_speed_kmh: 20.0
+  recovery:
+    enabled: true
+    initial_lateral_offsets_m: [0.0, -0.35, 0.35, -0.7, 0.7]
+    initial_yaw_offsets_deg: [0.0, -4.0, 4.0]
+  quality_gate:
+    enabled: true
+    max_attempts: 180
+    min_progress_m: 60.0
+    max_collision_frames: 0
+    max_offroad_fraction: 0.005
+    max_red_light_fraction: 0.0
+    max_blocked_fraction: 0.05
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+lane_keep:
+  target_speed_mps: 5.56
+  throttle: 0.42
+  speed_kp: 0.04
+  throttle_min: 0.20
+  throttle_max: 0.60
+  overspeed_margin_mps: 2.0
+  brake_kp: 0.08
+  steer_limit: 0.25
+  steer_bias: 0.0
+  lane_offset_gain: 0.18
+  heading_error_gain: 1.0
+
+output:
+  dataset_path: data/d1_city_free_drive_recovery/carla_d1_city_free_drive_recovery_fast.h5
+  metadata_path: data/d1_city_free_drive_recovery/metadata.json
+  recorder_path: data/d1_city_free_drive_recovery/carla_d1_city_free_drive_recovery.log
+  preview_dir: data/d1_city_free_drive_recovery/previews
+  pixel_compression: none

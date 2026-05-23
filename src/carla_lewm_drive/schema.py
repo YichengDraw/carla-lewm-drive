@@ -17,6 +17,9 @@ REQUIRED_H5_KEYS = (
 OPTIONAL_H5_KEYS = (
     "route_id",
     "weather_id",
+    "teacher_policy_id",
+    "initial_lateral_offset_m",
+    "initial_yaw_offset_deg",
     "timestamp",
     "speed_mps",
     "route_progress_m",

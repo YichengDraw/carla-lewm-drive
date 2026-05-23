@@ -27,6 +27,12 @@ class FrameRecord:
     blocked: float
 
 
+@dataclass(frozen=True)
+class RecoveryPerturbation:
+    lateral_offset_m: float = 0.0
+    yaw_offset_deg: float = 0.0
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect a CARLA HDF5 dataset for Driving-LeWM.")
     parser.add_argument("--config", type=Path, default=Path("configs/d0_smoke.yaml"))
@@ -74,13 +80,82 @@ def simplify_traffic_lights(carla, world, scenario: dict[str, Any]) -> None:
         actor.freeze(True)
 
 
-def spawn_ego(carla, world, spawn_index: int):
+def select_recovery_perturbation(attempt_idx: int, recovery_cfg: dict[str, Any] | None) -> RecoveryPerturbation:
+    recovery_cfg = recovery_cfg or {}
+    if not bool(recovery_cfg.get("enabled", False)):
+        return RecoveryPerturbation()
+    lateral_offsets = list(recovery_cfg.get("initial_lateral_offsets_m", [0.0]))
+    yaw_offsets = list(recovery_cfg.get("initial_yaw_offsets_deg", [0.0]))
+    if not lateral_offsets:
+        lateral_offsets = [0.0]
+    if not yaw_offsets:
+        yaw_offsets = [0.0]
+    lateral = float(lateral_offsets[int(attempt_idx) % len(lateral_offsets)])
+    yaw = float(yaw_offsets[(int(attempt_idx) // len(lateral_offsets)) % len(yaw_offsets)])
+    return RecoveryPerturbation(lateral_offset_m=lateral, yaw_offset_deg=yaw)
+
+
+def lane_keep_steer(lane_offset_m: float, heading_error_rad: float, cfg: dict[str, Any]) -> float:
+    lane_cfg = cfg.get("lane_keep", {})
+    steer_limit = abs(float(lane_cfg.get("steer_limit", 0.25)))
+    steer_bias = float(lane_cfg.get("steer_bias", 0.0))
+    lane_gain = float(lane_cfg.get("lane_offset_gain", 0.18))
+    heading_gain = float(lane_cfg.get("heading_error_gain", 1.0))
+    steer = steer_bias - lane_gain * float(lane_offset_m) - heading_gain * float(heading_error_rad)
+    return float(np.clip(steer, -steer_limit, steer_limit))
+
+
+def lane_keep_action(lane_offset_m: float, heading_error_rad: float, speed_mps: float, cfg: dict[str, Any]) -> np.ndarray:
+    lane_cfg = cfg.get("lane_keep", {})
+    scenario = cfg["scenario"]
+    target_speed_mps = float(lane_cfg.get("target_speed_mps", float(scenario["target_speed_kmh"]) / 3.6))
+    throttle_base = float(lane_cfg.get("throttle", 0.42))
+    throttle_kp = float(lane_cfg.get("speed_kp", 0.04))
+    throttle_min = float(lane_cfg.get("throttle_min", 0.20))
+    throttle_max = float(lane_cfg.get("throttle_max", 0.60))
+    speed_error = target_speed_mps - float(speed_mps)
+    throttle = float(np.clip(throttle_base + throttle_kp * speed_error, throttle_min, throttle_max))
+    brake = 0.0
+    overspeed_margin = float(lane_cfg.get("overspeed_margin_mps", 2.0))
+    if speed_error < -overspeed_margin:
+        throttle = 0.0
+        brake = float(np.clip(float(lane_cfg.get("brake_kp", 0.08)) * (-speed_error - overspeed_margin), 0.0, 0.35))
+    return np.asarray([throttle, lane_keep_steer(lane_offset_m, heading_error_rad, cfg), brake], dtype=np.float32)
+
+
+def to_vehicle_control(carla, action: np.ndarray):
+    clipped = np.asarray(action, dtype=np.float32).reshape(3)
+    clipped = np.clip(clipped, [0.0, -1.0, 0.0], [1.0, 1.0, 1.0])
+    return carla.VehicleControl(throttle=float(clipped[0]), steer=float(clipped[1]), brake=float(clipped[2]))
+
+
+def perturbed_spawn_transform(carla, transform, perturbation: RecoveryPerturbation):
+    if abs(perturbation.lateral_offset_m) < 1e-6 and abs(perturbation.yaw_offset_deg) < 1e-6:
+        return transform
+    yaw = np.deg2rad(float(transform.rotation.yaw))
+    right_x = float(np.cos(yaw + np.pi / 2.0))
+    right_y = float(np.sin(yaw + np.pi / 2.0))
+    location = carla.Location(
+        x=float(transform.location.x) + right_x * float(perturbation.lateral_offset_m),
+        y=float(transform.location.y) + right_y * float(perturbation.lateral_offset_m),
+        z=float(transform.location.z) + 0.05,
+    )
+    rotation = carla.Rotation(
+        pitch=float(transform.rotation.pitch),
+        yaw=float(transform.rotation.yaw) + float(perturbation.yaw_offset_deg),
+        roll=float(transform.rotation.roll),
+    )
+    return carla.Transform(location, rotation)
+
+
+def spawn_ego(carla, world, spawn_index: int, perturbation: RecoveryPerturbation | None = None):
     blueprints = world.get_blueprint_library().filter("vehicle.tesla.model3")
     bp = blueprints[0]
     spawn_points = world.get_map().get_spawn_points()
     if not spawn_points:
         raise RuntimeError("CARLA map has no spawn points")
     transform = spawn_points[spawn_index % len(spawn_points)]
+    transform = perturbed_spawn_transform(carla, transform, perturbation or RecoveryPerturbation())
     ego = world.try_spawn_actor(bp, transform)
     if ego is None:
         raise RuntimeError(f"Failed to spawn ego vehicle at spawn index {spawn_index}")
@@ -208,6 +283,8 @@ def append_episode(
     records: list[FrameRecord],
     route_id: int,
     weather_id: int,
+    teacher_policy_id: int,
+    perturbation: RecoveryPerturbation,
     output: dict[str, list[Any]],
     global_step: int,
 ) -> int:
@@ -221,6 +298,9 @@ def append_episode(
     output["step_idx"].extend(list(range(len(pixels))))
     output["route_id"].extend([route_id] * len(pixels))
     output["weather_id"].extend([weather_id] * len(pixels))
+    output["teacher_policy_id"].extend([teacher_policy_id] * len(pixels))
+    output["initial_lateral_offset_m"].extend([perturbation.lateral_offset_m] * len(pixels))
+    output["initial_yaw_offset_deg"].extend([perturbation.yaw_offset_deg] * len(pixels))
     for record in records:
         for key, value in asdict(record).items():
             output[key].append(value)
@@ -257,6 +337,9 @@ def run_collection(cfg: dict[str, Any]) -> Path:
             "step_idx",
             "route_id",
             "weather_id",
+            "teacher_policy_id",
+            "initial_lateral_offset_m",
+            "initial_yaw_offset_deg",
             "timestamp",
             "speed_mps",
             "route_progress_m",
@@ -299,7 +382,11 @@ def run_collection(cfg: dict[str, Any]) -> Path:
         attempted_episodes = 0
         while accepted_episodes < episodes and attempted_episodes < max_attempts:
             spawn_index = spawn_indices[attempted_episodes % len(spawn_indices)]
-            ego = spawn_ego(carla, world, spawn_index)
+            teacher_policy = str(scenario.get("teacher_policy", "autopilot")).lower()
+            if teacher_policy not in {"autopilot", "lane_keep"}:
+                raise ValueError("scenario.teacher_policy must be 'autopilot' or 'lane_keep'")
+            perturbation = select_recovery_perturbation(attempted_episodes, scenario.get("recovery", {}))
+            ego = spawn_ego(carla, world, spawn_index, perturbation=perturbation)
             actors.append(ego)
             camera = make_camera(carla, world, ego, cfg)
             actors.append(camera)
@@ -308,8 +395,18 @@ def run_collection(cfg: dict[str, Any]) -> Path:
             collision_frame = {"last": -1}
             collision_sensor.listen(lambda event: collision_frame.__setitem__("last", event.frame))
             q = listen_queue(camera)
-            ego.set_autopilot(True, traffic_manager.get_port())
-            traffic_manager.vehicle_percentage_speed_difference(ego, 100.0 - float(scenario["target_speed_kmh"]) / 30.0 * 100.0)
+            pending_action: np.ndarray | None = None
+            if teacher_policy == "autopilot":
+                ego.set_autopilot(True, traffic_manager.get_port())
+                traffic_manager.vehicle_percentage_speed_difference(
+                    ego,
+                    100.0 - float(scenario["target_speed_kmh"]) / 30.0 * 100.0,
+                )
+            else:
+                ego.set_autopilot(False)
+                initial_transform = ego.get_transform()
+                initial_offset, initial_heading, _ = lane_metrics(carla, world.get_map(), initial_transform)
+                pending_action = lane_keep_action(initial_offset, initial_heading, vehicle_speed(ego), cfg)
 
             ep_pixels: list[np.ndarray] = []
             ep_actions: list[np.ndarray] = []
@@ -322,6 +419,8 @@ def run_collection(cfg: dict[str, Any]) -> Path:
             blocked_count = 0
 
             for _ in range(steps_per_episode):
+                if pending_action is not None:
+                    ego.apply_control(to_vehicle_control(carla, pending_action))
                 frame_id = world.tick()
                 image = q.get(timeout=5.0)
                 while image.frame < frame_id:
@@ -342,7 +441,11 @@ def run_collection(cfg: dict[str, Any]) -> Path:
                 control = ego.get_control()
                 at_red = float(ego.is_at_traffic_light() and ego.get_traffic_light_state() == carla.TrafficLightState.Red)
                 collided = float(collision_frame["last"] == frame_id)
-                action = np.array([control.throttle, control.steer, control.brake], dtype=np.float32)
+                if teacher_policy == "lane_keep":
+                    action = lane_keep_action(lane_offset, heading_error, speed, cfg)
+                    pending_action = action
+                else:
+                    action = np.array([control.throttle, control.steer, control.brake], dtype=np.float32)
                 state_vec = np.array([loc.x, loc.y, transform.rotation.yaw, speed, progress, lane_offset], dtype=np.float32)
                 proprio_vec = np.array([speed, lane_offset, heading_error], dtype=np.float32)
 
@@ -373,6 +476,9 @@ def run_collection(cfg: dict[str, Any]) -> Path:
                 "accepted_episode": accepted_episodes if accepted else None,
                 "accepted": accepted,
                 "spawn_index": spawn_index,
+                "teacher_policy": teacher_policy,
+                "initial_lateral_offset_m": perturbation.lateral_offset_m,
+                "initial_yaw_offset_deg": perturbation.yaw_offset_deg,
                 "failures": failures,
                 **stats,
             }
@@ -388,6 +494,8 @@ def run_collection(cfg: dict[str, Any]) -> Path:
                     records=ep_records,
                     route_id=spawn_index,
                     weather_id=0,
+                    teacher_policy_id=0 if teacher_policy == "autopilot" else 1,
+                    perturbation=perturbation,
                     output=output,
                     global_step=global_step,
                 )
@@ -429,7 +537,7 @@ def run_collection(cfg: dict[str, Any]) -> Path:
             except Exception:
                 pass
 
-    write_hdf5(dataset_path, output)
+    write_hdf5(dataset_path, output, out_cfg)
     metadata = {
         "scenario": scenario,
         "camera": cfg["camera"],
@@ -443,11 +551,21 @@ def run_collection(cfg: dict[str, Any]) -> Path:
     return dataset_path
 
 
-def write_hdf5(path: Path, output: dict[str, list[Any]]) -> None:
+def write_hdf5(path: Path, output: dict[str, list[Any]], out_cfg: dict[str, Any] | None = None) -> None:
+    out_cfg = out_cfg or {}
+    pixel_compression = out_cfg.get("pixel_compression", "gzip")
+    compression_kwargs: dict[str, Any]
+    if pixel_compression in {None, False, "none", "None", "NONE", "null", "Null", "NULL"}:
+        compression_kwargs = {}
+    else:
+        compression_kwargs = {
+            "compression": str(pixel_compression),
+            "compression_opts": int(out_cfg.get("pixel_compression_opts", 4)),
+        }
     with h5py.File(path, "w") as f:
         f.create_dataset("ep_len", data=np.asarray(output["ep_len"], dtype=np.int32))
         f.create_dataset("ep_offset", data=np.asarray(output["ep_offset"], dtype=np.int32))
-        f.create_dataset("pixels", data=np.asarray(output["pixels"], dtype=np.uint8), compression="gzip", compression_opts=4)
+        f.create_dataset("pixels", data=np.asarray(output["pixels"], dtype=np.uint8), **compression_kwargs)
         f.create_dataset("action", data=np.asarray(output["action"], dtype=np.float32))
         f.create_dataset("state", data=np.asarray(output["state"], dtype=np.float32))
         f.create_dataset("proprio", data=np.asarray(output["proprio"], dtype=np.float32))
@@ -456,6 +574,9 @@ def write_hdf5(path: Path, output: dict[str, list[Any]]) -> None:
         for key in (
             "route_id",
             "weather_id",
+            "teacher_policy_id",
+            "initial_lateral_offset_m",
+            "initial_yaw_offset_deg",
             "timestamp",
             "speed_mps",
             "route_progress_m",
@@ -466,7 +587,7 @@ def write_hdf5(path: Path, output: dict[str, list[Any]]) -> None:
             "red_light",
             "blocked",
         ):
-            dtype = np.int32 if key in {"route_id", "weather_id"} else np.float32
+            dtype = np.int32 if key in {"route_id", "weather_id", "teacher_policy_id"} else np.float32
             f.create_dataset(key, data=np.asarray(output[key], dtype=dtype))
 
 
