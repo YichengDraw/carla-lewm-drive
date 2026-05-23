@@ -95,13 +95,13 @@ def is_action_policy(policy: str) -> bool:
 
 def resolve_policy(cfg: dict[str, Any], args: argparse.Namespace | None = None) -> str:
     eval_cfg = cfg.get("eval", {})
-    policy = eval_cfg.get("policy", "checkpoint")
+    policy = eval_cfg.get("policy")
     if args is not None:
         if args.baseline is not None:
             policy = args.baseline
         elif args.policy is not None:
             policy = args.policy
-        elif args.checkpoint is not None:
+        elif args.checkpoint is not None and policy is None:
             policy = "checkpoint"
     return normalize_policy(policy)
 

@@ -14,6 +14,7 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     lane_keep_steer,
     maybe_govern_model_speed,
     normalize_policy,
+    resolve_policy,
     run_dry_eval,
     write_action_trace,
     write_metrics,
@@ -296,6 +297,20 @@ def test_lane_keep_policy_dry_run_does_not_require_checkpoint(tmp_path):
 def test_model_action_policy_normalizes_to_model_backed_action():
     assert normalize_policy("action") == "model_action"
     assert normalize_policy("model_action_lane_keep") == "model_action_lane_keep"
+
+
+def test_checkpoint_argument_preserves_configured_action_policy():
+    cfg = {"eval": {"policy": "model_action"}}
+    args = SimpleNamespace(baseline=None, policy=None, checkpoint="best.pt")
+
+    assert resolve_policy(cfg, args) == "model_action"
+
+
+def test_checkpoint_argument_defaults_to_planning_policy_without_config_policy():
+    cfg = {"eval": {}}
+    args = SimpleNamespace(baseline=None, policy=None, checkpoint="best.pt")
+
+    assert resolve_policy(cfg, args) == "model"
 
 
 def test_apply_cli_overrides_supports_short_eval_knobs(tmp_path):
