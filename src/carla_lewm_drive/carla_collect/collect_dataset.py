@@ -87,6 +87,22 @@ def spawn_ego(carla, world, spawn_index: int):
     return ego
 
 
+def safe_stop_actor(actor: Any) -> None:
+    try:
+        if bool(getattr(actor, "is_alive", True)):
+            actor.stop()
+    except Exception:
+        pass
+
+
+def safe_destroy_actor(actor: Any) -> None:
+    try:
+        if bool(getattr(actor, "is_alive", True)):
+            actor.destroy()
+    except Exception:
+        pass
+
+
 def listen_queue(sensor):
     q: queue.Queue = queue.Queue()
     sensor.listen(q.put)
@@ -374,11 +390,11 @@ def run_collection(cfg: dict[str, Any]) -> Path:
                 accepted_episodes += 1
             else:
                 rejected_episodes.append(event)
-            collision_sensor.stop()
-            camera.stop()
-            collision_sensor.destroy()
-            camera.destroy()
-            ego.destroy()
+            safe_stop_actor(collision_sensor)
+            safe_stop_actor(camera)
+            safe_destroy_actor(collision_sensor)
+            safe_destroy_actor(camera)
+            safe_destroy_actor(ego)
             actors.clear()
             attempted_episodes += 1
         if accepted_episodes < episodes:
@@ -391,13 +407,16 @@ def run_collection(cfg: dict[str, Any]) -> Path:
             client.stop_recorder()
         except Exception:
             pass
-        for actor in actors:
-            try:
-                actor.destroy()
-            except Exception:
-                pass
-        traffic_manager.set_synchronous_mode(False)
-        world.apply_settings(original_settings)
+        for actor in reversed(actors):
+            safe_destroy_actor(actor)
+        try:
+            traffic_manager.set_synchronous_mode(False)
+        except Exception:
+            pass
+        try:
+            world.apply_settings(original_settings)
+        except Exception:
+            pass
 
     write_hdf5(dataset_path, output)
     metadata = {
