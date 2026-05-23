@@ -33,6 +33,9 @@ class DrivingLeWMConfig:
     pred_aux_weight: float = 1.0
     action_weight: float = 0.0
     pred_action_weight: float = 1.0
+    action_component_weights: tuple[float, float, float] | None = None
+    action_active_steer_weight: float = 1.0
+    action_active_steer_threshold: float = 0.0
     action_conflict_weight: float = 0.0
     pred_action_conflict_weight: float = 1.0
     progress_mode: str = "absolute"
@@ -183,6 +186,42 @@ class DrivingLeWM(nn.Module):
         return (throttle * brake).mean()
 
     @staticmethod
+    def action_regression_loss(
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        *,
+        component_weights: tuple[float, float, float] | list[float] | None = None,
+        active_steer_weight: float = 1.0,
+        active_steer_threshold: float = 0.0,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        raw = F.smooth_l1_loss(pred.float(), target.float(), reduction="none")
+        block = raw.reshape(*raw.shape[:-1], -1, 3)
+        reduce_dims = tuple(range(block.ndim - 1))
+        component_losses = block.mean(dim=reduce_dims)
+
+        if component_weights is None:
+            weights = pred.new_ones(3)
+        else:
+            if len(component_weights) != 3:
+                raise ValueError("action_component_weights must contain throttle, steer, brake weights")
+            weights = pred.new_tensor(component_weights, dtype=block.dtype)
+        weight_block = weights.reshape(*([1] * (block.ndim - 1)), 3).expand_as(block).clone()
+        if active_steer_weight != 1.0:
+            target_block = target.float().reshape(*target.shape[:-1], -1, 3)
+            active = target_block[..., 1].abs() >= float(active_steer_threshold)
+            weight_block[..., 1] = torch.where(
+                active,
+                weight_block[..., 1] * float(active_steer_weight),
+                weight_block[..., 1],
+            )
+        total = (block * weight_block).sum() / weight_block.sum().clamp_min(1e-8)
+        return total, {
+            "throttle": component_losses[0],
+            "steer": component_losses[1],
+            "brake": component_losses[2],
+        }
+
+    @staticmethod
     def progress_signal(route_progress_m: torch.Tensor, mode: str) -> torch.Tensor:
         mode = str(mode).lower()
         if mode == "absolute":
@@ -229,8 +268,20 @@ class DrivingLeWM(nn.Module):
 
         action_target = batch["action"].float()
         pred_action_target = action_target[:, 1 : self.cfg.history_size + 1].detach()
-        action_loss = F.smooth_l1_loss(out["action"], action_target)
-        pred_action_loss = F.smooth_l1_loss(out["pred_action"], pred_action_target)
+        action_loss, action_parts = self.action_regression_loss(
+            out["action"],
+            action_target,
+            component_weights=self.cfg.action_component_weights,
+            active_steer_weight=self.cfg.action_active_steer_weight,
+            active_steer_threshold=self.cfg.action_active_steer_threshold,
+        )
+        pred_action_loss, pred_action_parts = self.action_regression_loss(
+            out["pred_action"],
+            pred_action_target,
+            component_weights=self.cfg.action_component_weights,
+            active_steer_weight=self.cfg.action_active_steer_weight,
+            active_steer_threshold=self.cfg.action_active_steer_threshold,
+        )
         action_total = action_loss + self.cfg.pred_action_weight * pred_action_loss
         action_conflict = self.action_conflict_loss(out["action"])
         pred_action_conflict = self.action_conflict_loss(out["pred_action"])
@@ -253,6 +304,12 @@ class DrivingLeWM(nn.Module):
             "pred_aux_loss": pred_aux_loss.detach(),
             "action_loss": action_loss.detach(),
             "pred_action_loss": pred_action_loss.detach(),
+            "action_throttle_loss": action_parts["throttle"].detach(),
+            "action_steer_loss": action_parts["steer"].detach(),
+            "action_brake_loss": action_parts["brake"].detach(),
+            "pred_action_throttle_loss": pred_action_parts["throttle"].detach(),
+            "pred_action_steer_loss": pred_action_parts["steer"].detach(),
+            "pred_action_brake_loss": pred_action_parts["brake"].detach(),
             "action_conflict_loss": action_conflict.detach(),
             "pred_action_conflict_loss": pred_action_conflict.detach(),
         }

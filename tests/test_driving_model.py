@@ -65,6 +65,37 @@ def test_action_conflict_loss_penalizes_positive_throttle_and_brake_overlap():
     assert float(loss) == pytest.approx((0.0 + 0.06 + 0.0 + 0.0) / 4)
 
 
+def test_action_regression_loss_can_weight_steering_component():
+    pred = torch.zeros(1, 1, 3)
+    target = torch.tensor([[[0.2, 0.2, 0.2]]], dtype=torch.float32)
+
+    loss, parts = DrivingLeWM.action_regression_loss(pred, target, component_weights=[1.0, 8.0, 1.0])
+
+    per_component = 0.5 * 0.2**2
+    assert float(parts["throttle"]) == pytest.approx(per_component)
+    assert float(parts["steer"]) == pytest.approx(per_component)
+    assert float(parts["brake"]) == pytest.approx(per_component)
+    assert float(loss) == pytest.approx(per_component)
+
+
+def test_action_regression_loss_upweights_active_steer_samples():
+    pred = torch.zeros(1, 2, 3)
+    target = torch.tensor([[[0.0, 0.02, 0.0], [0.0, 0.20, 0.0]]], dtype=torch.float32)
+
+    loss, _ = DrivingLeWM.action_regression_loss(
+        pred,
+        target,
+        component_weights=[1.0, 1.0, 1.0],
+        active_steer_weight=5.0,
+        active_steer_threshold=0.1,
+    )
+
+    low = 0.5 * 0.02**2
+    high = 0.5 * 0.20**2
+    expected = (low + high * 5.0) / 10.0
+    assert float(loss) == pytest.approx(expected)
+
+
 def test_no_aux_config_disables_aux_head_and_aux_losses(monkeypatch):
     class DummyEncoder(nn.Module):
         def __init__(self) -> None:

@@ -141,7 +141,7 @@ HTML = r"""<!doctype html>
           <div class="metric"><span>Action-only BC</span><strong>running</strong><span><code>d1_tiny_h3_fs5_action_only_bc_10k</code></span></div>
         </div>
         <p>当前 W&B run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_action_only_bc_10k-20260523-222519-3bb58927"><code>d1_tiny_h3_fs5_action_only_bc_10k-20260523-222519-3bb58927</code></a>。上一轮 no-aux run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7"><code>d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7</code></a>。</p>
-        <div class="callout">截至 2026-05-23 22:25 Asia/Shanghai，D1 no-aux 训练已 early-stop；远端完成 1km 控制器门控。<code>outputs/d1_eval_lane_keep_1km</code> 的 full-6 mean Safety IFD 是 871.94m，simple-5 是派生 1000m pass。当前 5090 上正在运行 <code>train_d1_tiny_action_only_bc_10k.yaml</code>。</div>
+        <div class="callout">截至 2026-05-23 22:33 Asia/Shanghai，D1 no-aux 训练已 early-stop；远端完成 1km 控制器门控。<code>outputs/d1_eval_lane_keep_1km</code> 的 full-6 mean Safety IFD 是 871.94m，simple-5 是派生 1000m pass。当前 5090 上正在运行 <code>train_d1_tiny_action_only_bc_10k.yaml</code>；epoch-1 诊断仍有 steering collapse，已准备 <code>train_d1_tiny_action_weighted_bc_10k.yaml</code> 作为下一分支。</div>
       </section>
 
       <section id="task" data-kind="task">
@@ -241,8 +241,9 @@ HTML = r"""<!doctype html>
           <tr><td>5</td><td><code>eval_d1_city_free_drive_lane_keep_1km.yaml</code></td><td>full-6 控制器 1km gate；5/6 pass，spawn 8 failed。</td><td><span class="tag warn">done / split</span></td></tr>
           <tr><td>6</td><td><code>train_d1_tiny_action_only_bc_10k.yaml</code></td><td>关掉 latent prediction 权重，先测纯 action BC 能否学到 steering feedback。</td><td><span class="tag">running</span></td></tr>
           <tr><td>7</td><td><code>eval_d1_city_free_drive_model_action_1km_simple.yaml</code></td><td>当前 learned-policy 1km 主门控：五条控制器验证路线。</td><td><span class="tag">next</span></td></tr>
-          <tr><td>8</td><td><code>D1-W weather mix</code></td><td>D1-simple-1km 成立后，用 Clear/Cloudy/Wet/SoftRain 多天气混训并按天气分开评估。</td><td><span class="tag warn">paused</span></td></tr>
-          <tr><td>9</td><td><code>ViT small</code></td><td>tiny 已有闭环信号后再放大；保持同一 no-aux 目标和同一评估套件。</td><td><span class="tag warn">paused</span></td></tr>
+          <tr><td>8</td><td><code>train_d1_tiny_action_weighted_bc_10k.yaml</code></td><td>若普通 BC 仍 steering collapse，则加 steer component / active-steer 权重。</td><td><span class="tag">ready</span></td></tr>
+          <tr><td>9</td><td><code>D1-W weather mix</code></td><td>D1-simple-1km 成立后，用 Clear/Cloudy/Wet/SoftRain 多天气混训并按天气分开评估。</td><td><span class="tag warn">paused</span></td></tr>
+          <tr><td>10</td><td><code>ViT small</code></td><td>tiny 已有闭环信号后再放大；保持同一 no-aux 目标和同一评估套件。</td><td><span class="tag warn">paused</span></td></tr>
         </table>
       </section>
 
@@ -305,7 +306,11 @@ PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
 
 PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d1_city_free_drive_model_action_1km_simple.yaml \
-  --checkpoint outputs/d1_tiny_h3_fs5_action_only_bc_10k/best.pt</code></pre>
+  --checkpoint outputs/d1_tiny_h3_fs5_action_only_bc_10k/best.pt
+
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_d1_tiny_action_weighted_bc_10k.yaml \
+  --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5</code></pre>
       </section>
 
       <section id="gates" data-kind="risk">
@@ -314,7 +319,7 @@ PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
           <div class="callout"><strong>Current go</strong><br>控制器 simple-5 已经具备 1km 可达性；当前继续 action-only BC 训练并用 simple-1km 闭环评估。</div>
           <div class="callout"><strong>Pause</strong><br>spawn 8 在控制器下 231.62m 离路；该路线进入 route-command/recovery 数据诊断，不作为第一阶段 learned-policy 成功门槛。</div>
           <div class="callout bad"><strong>Stop</strong><br>CARLA timing guard 报外部 tick；W&B 缺失；no-aux 和 aux 都在 50m 内出现 primary safety failure。</div>
-          <div class="callout"><strong>Next diagnose</strong><br>对比专家/预测动作分布，跑简单 BC baseline，加入 recovery data 或 route command 后再决定是否继续训练。</div>
+          <div class="callout"><strong>Next diagnose</strong><br>对比专家/预测动作分布；若普通 BC 继续输出低方差 steering，启动 weighted steering BC；再根据闭环决定 recovery data 或 route command。</div>
         </div>
       </section>
 
@@ -326,6 +331,7 @@ PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
           <tr><td><code>D1-simple-1km</code></td><td>五条控制器已验证的 Town03 路线，目标是 learned policy 在无车、绿灯下跑满 1000m。</td></tr>
           <tr><td><code>D1-full-6</code></td><td>原始六路线压力测试；包含 spawn 8，用于 route command / recovery 诊断。</td></tr>
           <tr><td><code>BC</code></td><td>Behavior Cloning，直接监督模型预测 expert action，用来判断数据和动作接口是否足够。</td></tr>
+          <tr><td><code>weighted BC</code></td><td>加权 Behavior Cloning；仍然直接预测 action，但提高 steer 和高转向样本的训练权重。</td></tr>
           <tr><td><code>lane_keep</code></td><td>确定性车道保持控制器；它不是 learned policy，只用来验证路线和评估器是否可达。</td></tr>
           <tr><td><code>primary safety failure</code></td><td>collision、off-road / roadside departure、blocked。</td></tr>
           <tr><td><code>red-light</code></td><td>D1-B 开启真实信号灯后纳入 hard failure。</td></tr>

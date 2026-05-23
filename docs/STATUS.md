@@ -22,6 +22,8 @@ The first action-failure diagnostic confirms steering collapse. On a light test 
 
 The deterministic 1km control gate is partly passed. On the full six-route set `[3, 4, 6, 8, 10, 12]`, lane-keep reached `1000m` cleanly on five routes and failed off-road on spawn `8` at `231.62m`, for mean Safety IFD `871.94m` and primary-safety success `5/6`. This confirms that a simple 1km city route is feasible, while spawn `8` should be treated as a separate route-conditioning/recovery case. The immediate learned-policy gate is now `D1-simple-1km`: spawn routes `[3, 4, 6, 10, 12]`, no traffic, forced green lights, `1000m` cap, and no collision/off-road/blocked/red-light. Action-only BC 10k is running on the 5090 with W&B enabled: `d1_tiny_h3_fs5_action_only_bc_10k-20260523-222519-3bb58927`.
 
+An early epoch-1 offline diagnostic of the action-only BC checkpoint still shows steering collapse: predicted steer std `0.00497` versus target std `0.10760`, with near-zero steer correlation. This is not enough to stop the run, but the next fallback is already implemented as `configs/train_d1_tiny_action_weighted_bc_10k.yaml`: weighted action BC with steer component weight `8.0` and active-steer weight `4.0` for targets above `0.03`.
+
 ## Repository And Environment
 
 - GitHub repository: `https://github.com/YichengDraw/carla-lewm-drive`
@@ -121,7 +123,8 @@ The active next gate is D1 action-policy diagnosis, not weather or scale:
 2. Use `configs/eval_d1_city_free_drive_model_action_1km_simple.yaml` as the first 1km learned-policy gate because the deterministic controller already proves those five routes are feasible.
 3. Keep `configs/eval_d1_city_free_drive_model_action_1km.yaml` as the full-6 stress gate; spawn `8` is now a route-conditioning/recovery diagnostic, not the first success criterion.
 4. Train or evaluate `configs/train_d1_tiny_action_only_bc_10k.yaml` on the same D1 dataset as a control baseline; if BC fails similarly, the dataset/task interface is the bottleneck.
-5. Add recovery/perturbation data or route-command labels before another long LeWM run; current pure no-aux action decoding lacks lane-correction behavior.
-6. Keep D1-W mixed weather paused until D1-A has a real single-weather closed-loop signal.
-7. Keep ViT small paused until the failure looks like capacity or visual robustness rather than action decoding / task conditioning.
-8. Run `aux + pred_aux` only as an ablation after the action-policy baseline is diagnosed; if it wins, report it as an engineering adapter, not the clean LeWM story.
+5. If action-only BC still has low steering variance, launch `configs/train_d1_tiny_action_weighted_bc_10k.yaml` before returning to LeWM latent objectives.
+6. Add recovery/perturbation data or route-command labels before another long LeWM run; current pure no-aux action decoding lacks lane-correction behavior.
+7. Keep D1-W mixed weather paused until D1-A has a real single-weather closed-loop signal.
+8. Keep ViT small paused until the failure looks like capacity or visual robustness rather than action decoding / task conditioning.
+9. Run `aux + pred_aux` only as an ablation after the action-policy baseline is diagnosed; if it wins, report it as an engineering adapter, not the clean LeWM story.

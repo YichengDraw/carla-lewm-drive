@@ -32,6 +32,8 @@ The action failure is now quantified: expert steering on a held-out sample has s
 
 The deterministic 1km check returned a useful split instead of a clean full pass: lane-keep finished `1000m` on spawn routes `3`, `4`, `6`, `10`, and `12`, but failed off-road on spawn `8` at `231.62m`. The current first learned-policy target is therefore `D1-simple-1km`: the five controller-validated routes, no traffic, forced green lights, `1000m` cap, and primary safety success on every route. The original six-route config remains as `D1-full-6` stress evaluation and as evidence that spawn `8` needs route conditioning or recovery data.
 
+The first epoch of action-only BC is not yet enough, and its current `best.pt` still predicts near-constant steering. A fallback is ready: `configs/train_d1_tiny_action_weighted_bc_10k.yaml` keeps the same architecture and data but weights the steering component and high-steer samples so MSE cannot hide behind mostly straight driving frames.
+
 ## Task Definition
 
 ### D1-simple-1km: City Free-Drive, No Traffic, Green Lights
@@ -244,6 +246,18 @@ Decision rule:
 - If BC reaches hundreds of meters or 1km on `D1-simple-1km`, the dataset/action interface is viable and the LeWM objective/action coupling is the bottleneck.
 - If BC wins, it becomes the control baseline that future LeWM variants must beat.
 - After any `D1-simple-1km` pass, run `configs/eval_d1_city_free_drive_model_action_1km.yaml` on the full six-route set and report spawn `8` separately.
+
+### Gate 3: Weighted Steering BC Fallback
+
+Run only if action-only BC keeps predicted steer variance far below target variance or fails closed-loop near the previous 30m boundary:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_d1_tiny_action_weighted_bc_10k.yaml \
+  --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5
+```
+
+This is still no-aux and action-only. It changes the loss geometry, not the model architecture: throttle/steer/brake are logged separately, steer gets component weight `8.0`, and active steering targets above `0.03` get an extra factor `4.0`.
 
 ## Evaluation Plan
 
