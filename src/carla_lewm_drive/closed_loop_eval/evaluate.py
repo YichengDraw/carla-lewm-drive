@@ -313,6 +313,7 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
     action_dim = int(data_cfg["frameskip"]) * 3
     lewm_cfg = DrivingLeWMConfig(
         encoder_scale=model_cfg["encoder_scale"],
+        encoder_pooling=str(model_cfg.get("encoder_pooling", "cls")),
         patch_size=int(model_cfg["patch_size"]),
         image_size=int(data_cfg["image_size"]),
         action_dim=action_dim,

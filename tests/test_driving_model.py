@@ -61,6 +61,52 @@ def test_progress_signal_rejects_unknown_mode():
         DrivingLeWM.progress_signal(route_progress, "bad-mode")
 
 
+def test_encoder_pooling_can_use_patch_tokens(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            tokens = torch.tensor(
+                [
+                    [10.0, 11.0, 12.0, 13.0],
+                    [1.0, 2.0, 3.0, 4.0],
+                    [5.0, 6.0, 7.0, 8.0],
+                ],
+                dtype=pixels.dtype,
+                device=pixels.device,
+            )
+            return SimpleNamespace(last_hidden_state=tokens.unsqueeze(0).expand(batch, -1, -1))
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    base = dict(
+        image_size=8,
+        patch_size=4,
+        action_dim=3,
+        embed_dim=4,
+        history_size=1,
+        predictor_depth=1,
+        predictor_heads=1,
+        predictor_mlp_dim=8,
+        use_aux_head=False,
+    )
+    pixels = torch.zeros(1, 1, 3, 8, 8)
+
+    mean_model = DrivingLeWM(DrivingLeWMConfig(**base, encoder_pooling="mean_patch"))
+    mean_model.projector = nn.Identity()
+    torch.testing.assert_close(mean_model.encode_pixels(pixels), torch.tensor([[[3.0, 4.0, 5.0, 6.0]]]))
+
+    combined_model = DrivingLeWM(DrivingLeWMConfig(**base, encoder_pooling="cls_mean"))
+    assert combined_model.projector[0].in_features == 8
+    combined_model.projector = nn.Identity()
+    torch.testing.assert_close(
+        combined_model.encode_pixels(pixels),
+        torch.tensor([[[10.0, 11.0, 12.0, 13.0, 3.0, 4.0, 5.0, 6.0]]]),
+    )
+
+
 def test_action_conflict_loss_penalizes_positive_throttle_and_brake_overlap():
     actions = torch.tensor(
         [

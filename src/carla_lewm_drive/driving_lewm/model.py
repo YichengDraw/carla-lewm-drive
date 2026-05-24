@@ -28,6 +28,7 @@ AUX_COMPONENTS = (
 @dataclass(frozen=True)
 class DrivingLeWMConfig:
     encoder_scale: str = "tiny"
+    encoder_pooling: str = "cls"
     patch_size: int = 14
     image_size: int = 224
     action_dim: int = 15
@@ -113,8 +114,9 @@ class DrivingLeWM(nn.Module):
         self.cfg = cfg
         self.encoder = self._make_vit(cfg)
         hidden_dim = int(self.encoder.config.hidden_size)
+        projector_input_dim = self._encoder_output_dim(hidden_dim, cfg.encoder_pooling)
         self.projector = nn.Sequential(
-            nn.Linear(hidden_dim, cfg.predictor_mlp_dim),
+            nn.Linear(projector_input_dim, cfg.predictor_mlp_dim),
             nn.GELU(),
             nn.LayerNorm(cfg.predictor_mlp_dim),
             nn.Linear(cfg.predictor_mlp_dim, cfg.embed_dim),
@@ -165,12 +167,30 @@ class DrivingLeWM(nn.Module):
         model_cfg = ViTConfig(**params)
         return ViTModel(model_cfg, add_pooling_layer=False, use_mask_token=False)
 
+    @staticmethod
+    def _encoder_output_dim(hidden_dim: int, pooling: str) -> int:
+        mode = str(pooling).lower()
+        if mode in {"cls", "mean_patch"}:
+            return int(hidden_dim)
+        if mode == "cls_mean":
+            return int(hidden_dim) * 2
+        raise ValueError("encoder_pooling must be one of: cls, mean_patch, cls_mean")
+
     def encode_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
         b, t = pixels.shape[:2]
         flat = pixels.reshape(b * t, *pixels.shape[2:]).float()
         out = self.encoder(flat, interpolate_pos_encoding=True)
-        cls = out.last_hidden_state[:, 0]
-        emb = self.projector(cls)
+        tokens = out.last_hidden_state
+        mode = str(self.cfg.encoder_pooling).lower()
+        if mode == "cls":
+            features = tokens[:, 0]
+        elif mode == "mean_patch":
+            features = tokens[:, 1:].mean(dim=1)
+        elif mode == "cls_mean":
+            features = torch.cat([tokens[:, 0], tokens[:, 1:].mean(dim=1)], dim=-1)
+        else:
+            raise ValueError("encoder_pooling must be one of: cls, mean_patch, cls_mean")
+        emb = self.projector(features)
         return emb.reshape(b, t, -1)
 
     def apply_route_condition(self, emb: torch.Tensor, route_id: torch.Tensor | int | None) -> torch.Tensor:
