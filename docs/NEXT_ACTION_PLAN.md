@@ -1,6 +1,22 @@
 # Next Execution Plan: D1 1km City Driving
 
-Last updated: 2026-05-23 22:25 Asia/Shanghai.
+Last updated: 2026-05-24 14:18 Asia/Shanghai.
+
+## Immediate 2026-05-24 Plan
+
+The current branch is no longer action-only BC. The active branch is `cls_mean + rollout aux + control-sign + DAgger`, because the last closed-loop failure showed a clear wrong-sign lane prediction under large positive lane offset.
+
+Current execution sequence:
+
+1. Finish the active W&B run `d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k`.
+2. Run offline rollout diagnostics with `scripts/analyze_aux_perception.py` and require tail/control-sign evidence before CARLA.
+3. Run a 100m gate on routes `[3, 4, 6, 10, 12]`.
+4. Run the 1km gate only if the 100m gate is `5/5` clean.
+5. If 100m fails, inspect action traces by failure direction, save frames, convert a new DAgger HDF5, and retrain.
+
+Current No-Go rule: do not spend 1km CARLA evaluation time after a branch fails 100m. The previous corrected 100m gate reached only `11.73m` mean Safety IFD with `5/5` off-road failures.
+
+Current Go rule: promote a branch to 1km only when offline control-sign accuracy is at least about `0.90` on active steering samples and the 100m closed-loop gate is clean.
 
 ## Long-Horizon Goal
 

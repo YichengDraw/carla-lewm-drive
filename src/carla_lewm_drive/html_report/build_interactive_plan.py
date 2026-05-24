@@ -15,60 +15,60 @@ HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CARLA-LeWM D1 城市自由行驶计划</title>
+  <title>CARLA-LeWM 1km 城市驾驶计划</title>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7f9;
+      --bg: #f7f8fa;
       --panel: #ffffff;
-      --ink: #172033;
-      --muted: #667085;
-      --line: #d8dee8;
-      --nav: #202a3a;
-      --blue: #0b63ce;
-      --green: #0b7a5b;
-      --amber: #a86100;
-      --red: #b42318;
-      --green-bg: #e8f6f0;
-      --amber-bg: #fff3dc;
-      --red-bg: #fdeceb;
-      --shadow: 0 10px 26px rgba(23, 32, 51, 0.08);
+      --ink: #1d2433;
+      --muted: #657082;
+      --line: #d9dee7;
+      --accent: #0b6bcb;
+      --good: #0f8a72;
+      --warn: #b96b00;
+      --bad: #b42318;
+      --good-bg: #e9f7f2;
+      --warn-bg: #fff4df;
+      --bad-bg: #fdeceb;
+      --shadow: 0 10px 28px rgba(21, 32, 54, 0.10);
     }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: Inter, "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--ink); line-height: 1.55; letter-spacing: 0; }
-    header { background: var(--nav); color: #fff; padding: 22px 28px; }
-    header h1 { margin: 0 0 6px; font-size: 24px; font-weight: 760; }
-    header p { margin: 0; color: #d5dbe7; max-width: 1040px; }
-    .toolbar { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 18px; background: rgba(255, 255, 255, .96); border-bottom: 1px solid var(--line); }
-    .toolbar input { width: min(390px, 52vw); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
-    button, .tab { border: 1px solid var(--line); background: #fff; color: var(--ink); padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 14px; }
-    button:hover, .tab.active { border-color: var(--blue); color: var(--blue); }
-    .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; max-width: 1250px; margin: 0 auto; padding: 18px; }
-    nav { position: sticky; top: 58px; align-self: start; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 12px; }
-    nav a { display: block; color: var(--ink); text-decoration: none; padding: 7px 8px; border-radius: 6px; font-size: 14px; }
-    nav a:hover { background: #eef5ff; color: var(--blue); }
-    main { display: grid; gap: 16px; }
-    section, details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); padding: 16px; }
-    section h2, details h2 { margin: 0 0 10px; font-size: 18px; }
-    details summary { cursor: pointer; font-weight: 720; font-size: 17px; }
-    a { color: var(--blue); }
-    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; min-height: 92px; }
-    .metric strong { display: block; font-size: 20px; margin: 2px 0; }
-    .metric span { color: var(--muted); font-size: 13px; }
-    .callout { border-left: 4px solid var(--amber); background: var(--amber-bg); padding: 10px 12px; border-radius: 6px; margin-top: 12px; }
-    .ok { border-left-color: var(--green); background: var(--green-bg); }
-    .bad { border-left-color: var(--red); background: var(--red-bg); }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    body { margin: 0; font-family: Inter, "Segoe UI", Arial, sans-serif; color: var(--ink); background: var(--bg); line-height: 1.55; letter-spacing: 0; }
+    header { background: #202a3a; color: #fff; padding: 22px 28px; }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    h3 { margin: 14px 0 8px; font-size: 15px; }
+    p { margin: 8px 0; }
+    a { color: var(--accent); }
+    code { background: #eef2f7; border-radius: 4px; padding: 1px 5px; }
+    pre { margin: 8px 0; padding: 12px; border-radius: 8px; overflow: auto; background: #111927; color: #dbeafe; font-size: 13px; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 8px; vertical-align: top; }
+    th, td { text-align: left; vertical-align: top; padding: 8px; border-bottom: 1px solid var(--line); }
     th { background: #f1f4f8; }
-    code { background: #eef2f7; padding: 1px 5px; border-radius: 4px; }
-    pre { overflow: auto; background: #111927; color: #dbeafe; padding: 12px; border-radius: 8px; font-size: 13px; }
-    .tag { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
-    .tag.good { color: #0f6b50; border-color: #b7e4d4; background: #e9f7f2; }
-    .tag.warn { color: #8a4d00; border-color: #f1cf8a; background: #fff4df; }
-    .tag.bad { color: #9f241a; border-color: #f2b8b5; background: #fdeceb; }
+    .toolbar { position: sticky; top: 0; z-index: 10; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 10px 18px; background: rgba(255,255,255,.96); border-bottom: 1px solid var(--line); }
+    .toolbar input { width: min(420px, 56vw); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
+    button, .tab { border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: #fff; color: var(--ink); cursor: pointer; }
+    button:hover, .tab.active { border-color: var(--accent); color: var(--accent); }
+    .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 18px; max-width: 1260px; margin: 0 auto; padding: 18px; }
+    nav { position: sticky; top: 58px; align-self: start; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+    nav a { display: block; padding: 7px 8px; border-radius: 6px; color: var(--ink); text-decoration: none; font-size: 14px; }
+    nav a:hover { color: var(--accent); background: #eef5ff; }
+    main { display: grid; gap: 16px; }
+    section, details { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+    summary { cursor: pointer; font-weight: 720; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; }
+    .metric { min-height: 92px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; }
+    .metric strong { display: block; margin: 2px 0; font-size: 20px; }
+    .metric span { color: var(--muted); font-size: 13px; }
+    .tag { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .good { color: var(--good); border-color: #b7e4d4; background: var(--good-bg); }
+    .warn { color: var(--warn); border-color: #f1cf8a; background: var(--warn-bg); }
+    .bad { color: var(--bad); border-color: #f2b8b5; background: var(--bad-bg); }
+    .callout { border-left: 4px solid var(--warn); background: var(--warn-bg); padding: 10px 12px; border-radius: 6px; margin-top: 12px; }
+    .callout.good { border-left-color: var(--good); }
+    .callout.bad { border-left-color: var(--bad); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     mark.search-hit { background: #fff08a; padding: 0 2px; }
     mark.current-hit { outline: 2px solid #f59e0b; }
     .hidden-kind { display: none; }
@@ -82,11 +82,11 @@ HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>CARLA-LeWM D1 城市自由行驶计划</h1>
-    <p>当前硬目标是让 learned policy 在简单城市街道无碰撞、无离路、无 blocked 的条件下跑满 1km；先过 no-traffic/green-light，再回到真实红绿灯。</p>
+    <h1>CARLA-LeWM 1km 城市驾驶计划</h1>
+    <p>读法：先看当前结论和 Go / No-Go，再看每个阶段的证据。当前硬停止条件是 learned model 在简化城市街道无离路、无碰撞、无阻塞、无红灯违规地行驶至少 1km。</p>
   </header>
   <div class="toolbar">
-    <input id="search" placeholder="搜索 D1 / aux / W&B / IFD / noaux / red light">
+    <input id="search" placeholder="搜索 cls_mean / controlsign / DAgger / W&B / 1km">
     <button id="prev" type="button">&lt;</button>
     <button id="next" type="button">&gt;</button>
     <span id="count" class="tag">0</span>
@@ -99,14 +99,10 @@ HTML = r"""<!doctype html>
   <div class="layout">
     <nav>
       <a href="#verdict">当前结论</a>
-      <a href="#task">D1 任务定义</a>
-      <a href="#metrics">指标优先级</a>
-      <a href="#aux">Aux 决策</a>
-      <a href="#live">实时状态</a>
-      <a href="#evidence">已有证据</a>
-      <a href="#matrix">实验矩阵</a>
-      <a href="#scaleout">扩展路线</a>
-      <a href="#decoder">实验名解码</a>
+      <a href="#task">任务定义</a>
+      <a href="#evidence">证据链</a>
+      <a href="#phases">阶段计划</a>
+      <a href="#wandb">W&B</a>
       <a href="#commands">命令</a>
       <a href="#gates">Go / No-Go</a>
       <a href="#terms">名词速查</a>
@@ -115,325 +111,216 @@ HTML = r"""<!doctype html>
       <section id="verdict" data-kind="all">
         <h2>当前结论</h2>
         <div class="metrics">
-          <div class="metric"><span>D0 model-only</span><strong>190m</strong><span>throttle-only 简化目标通过</span></div>
-          <div class="metric"><span>D0 pure action</span><strong>~25m</strong><span>无碰撞/离路，因限速停表</span></div>
-          <div class="metric"><span>D0 governed hybrid</span><strong>200m</strong><span>lane/speed governor 参与</span></div>
-          <div class="metric"><span>D1 no-aux total-best</span><strong>23.19m</strong><span>6/6 off-road，0% primary success</span></div>
-          <div class="metric"><span>D1 lane_keep full-6</span><strong>871.94m</strong><span>5/6 过 1km；spawn 8 在 231.62m 离路</span></div>
-          <div class="metric"><span>Next gate</span><strong>BC 1km</strong><span><code>D1-simple-1km</code> 五条控制器验证路线</span></div>
+          <div class="metric"><span>硬目标</span><strong>1km</strong><span>无离路、碰撞、阻塞、红灯违规</span></div>
+          <div class="metric"><span>当前主线</span><strong>running</strong><span><code>cls_mean + controlsign + DAgger</code></span></div>
+          <div class="metric"><span>上一 gate</span><strong>11.73m</strong><span>100m gate，5/5 offroad</span></div>
+          <div class="metric"><span>根因</span><strong>wrong sign</strong><span>真实偏移 +1.8m，预测仍为负</span></div>
+          <div class="metric"><span>新数据</span><strong>334</strong><span>失败帧 DAgger，23.7% 超过 1m 偏移</span></div>
+          <div class="metric"><span>Batch</span><strong>256</strong><span>RTX 5090 峰值 24.39GB</span></div>
         </div>
         <div class="callout">
-          当前结论：no-aux tiny learned action 仍失败在 30m 左右，原因已量化为 steering collapse。控制器验证显示五条 Town03 路线能稳定跑满 1km，spawn 8 是单独的 route-conditioning/recovery 压力点。下一步正在训练 action-only BC，目标是在 <code>D1-simple-1km</code> 上先拿到 learned-policy 1km。
+          当前判断：这还不是天气鲁棒性或 ViT 容量问题。闭环失败发生在 10-20m，且 trace 明确显示模型把大正 lane offset 预测成负数，从而持续往错误方向打方向。下一次有效尝试是让 loss 直接惩罚由 lane/heading 推出的 steering 符号错误，并把当前失败帧加入训练分布。
         </div>
-      </section>
-
-      <section id="live" data-kind="train">
-        <h2>实时状态</h2>
-        <div class="metrics">
-          <div class="metric"><span>D1 数据</span><strong>48k</strong><span>60 episodes，strict QC pass，contact sheet 已检查</span></div>
-          <div class="metric"><span>Batch probe</span><strong>256</strong><span>RTX 5090 峰值 24.388GB，正式 run 用 workers=4</span></div>
-          <div class="metric"><span>Clean no-aux</span><strong>done</strong><span><code>use_aux_head: false</code>，early stop at step 8760</span></div>
-          <div class="metric"><span>Best val</span><strong>0.13641</strong><span>epoch 40 / step 5840，total-best</span></div>
-          <div class="metric"><span>Eval fix</span><strong>d18a55d</strong><span><code>--checkpoint</code> 不再覆盖 <code>model_action</code></span></div>
-          <div class="metric"><span>Best action</span><strong>0.002903</strong><span>epoch 52 / step 7592，已保存 <code>best_action.pt</code></span></div>
-          <div class="metric"><span>Closed-loop</span><strong>failed</strong><span>total-best 23.19m；action-best 29.77m</span></div>
-          <div class="metric"><span>Lane_keep 1km</span><strong>5/6</strong><span>simple-5 derived pass；full-6 spawn 8 failed</span></div>
-          <div class="metric"><span>Action-only BC</span><strong>running</strong><span><code>d1_tiny_h3_fs5_action_only_bc_10k</code></span></div>
-        </div>
-        <p>当前 W&B run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_action_only_bc_10k-20260523-222519-3bb58927"><code>d1_tiny_h3_fs5_action_only_bc_10k-20260523-222519-3bb58927</code></a>。上一轮 no-aux run：<a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7"><code>d1_tiny_h3_fs5_core_action_noaux_20k-20260523-120525-460af3b7</code></a>。</p>
-        <div class="callout">截至 2026-05-23 22:33 Asia/Shanghai，D1 no-aux 训练已 early-stop；远端完成 1km 控制器门控。<code>outputs/d1_eval_lane_keep_1km</code> 的 full-6 mean Safety IFD 是 871.94m，simple-5 是派生 1000m pass。当前 5090 上正在运行 <code>train_d1_tiny_action_only_bc_10k.yaml</code>；epoch-1 诊断仍有 steering collapse，已准备 <code>train_d1_tiny_action_weighted_bc_10k.yaml</code> 作为下一分支。</div>
       </section>
 
       <section id="task" data-kind="task">
-        <h2>D1 任务定义</h2>
+        <h2>任务定义</h2>
         <table>
-          <tr><th>阶段</th><th>场景</th><th>规则</th><th>通过含义</th></tr>
-          <tr>
-            <td><code>D1-simple-1km</code></td>
-            <td>Town03，白天，干路面，无车，无行人，绿灯，5 个控制器验证 spawn route：3/4/6/10/12。</td>
-            <td>1000m cap；collision/off-road/blocked/red-light 立即停表；speed-limit 只记软惩罚；覆盖自然直行、弯道和路口几何。</td>
-            <td>当前第一阶段 learned-policy 成功门槛：城市道路视觉闭环跑满 1km。</td>
-          </tr>
-          <tr>
-            <td><code>D1-full-6</code></td>
-            <td>原始 6 route：3/4/6/8/10/12。</td>
-            <td>同 simple-1km；spawn 8 在 lane_keep 控制器下 231.62m 离路。</td>
-            <td>后续 stress gate，用于 route command / recovery data 诊断。</td>
-          </tr>
-          <tr>
-            <td><code>D1-B</code></td>
-            <td>同 D1-A，真实交通灯。</td>
-            <td>red-light violation 停表；speed-limit 继续软惩罚。</td>
-            <td>模型开始体现交通规则，而不是只沿路走。</td>
-          </tr>
-          <tr>
-            <td><code>D2</code></td>
-            <td>稀疏车辆，固定 traffic seed；或 D1-C route-command setting。</td>
-            <td>加入车车碰撞、前车交互，以及带 <code>change_lane_left/right</code> 命令标签的变道。</td>
-            <td>只有 D1 稳定且 route command 标签可用后再进入。</td>
-          </tr>
+          <tr><th>阶段</th><th>场景</th><th>通过条件</th></tr>
+          <tr><td><code>D1-simple-1km</code></td><td>Town03，ClearNoon，无车无人，强制绿灯，路线 3/4/6/10/12。</td><td>5/5 episode 跑满 1000m；无 offroad、collision、blocked、red-light。</td></tr>
+          <tr><td><code>D1-B lights</code></td><td>同 D1-simple-1km，但不强制绿灯。</td><td>在 1km 安全通过基础上，再要求红灯不违规。</td></tr>
+          <tr><td><code>D1-W weather</code></td><td>ClearNoon / CloudyNoon / WetNoon / SoftRainNoon 混训。</td><td>只有单天气 1km 过关后才进入；逐天气报告 Safety IFD。</td></tr>
+          <tr><td><code>D2 traffic</code></td><td>稀疏车辆，固定 traffic seed。</td><td>安全跟车/避让；当前暂停。</td></tr>
         </table>
-        <div class="callout">左右转应该在 D1-A 就覆盖，因为路口和弯道有明确道路几何目标。变道暂时不放进第一轮，因为无车、无导航命令时，模型没有唯一的“何时变道”目标；先把 stay-in-lane 和自然转向做实，再加命令化变道。</div>
+        <p>左右转由固定城市路线自然覆盖。变道暂缓，因为无车无导航命令时“何时变道”不是唯一目标；需要 route command 或 lane-change command 后再做。</p>
       </section>
 
-      <section id="metrics" data-kind="eval">
-        <h2>指标优先级</h2>
+      <section id="evidence" data-kind="eval">
+        <h2>证据链</h2>
         <table>
-          <tr><th>优先级</th><th>指标</th><th>配置/解释</th></tr>
-          <tr><td>1</td><td><code>mean_infraction_free_distance_m</code></td><td>D1-A 中 speed 不计入 first infraction；主看碰撞、离路、blocked 之前的距离。</td></tr>
-          <tr><td>1</td><td><code>success_rate_no_primary_safety_infraction</code></td><td>没有 collision、off-road、blocked 的 episode 比例。</td></tr>
-          <tr><td>2</td><td><code>success_rate_no_primary_or_red_infraction</code></td><td>D1-B 主指标：没有 collision、off-road、red-light、blocked。</td></tr>
-          <tr><td>3</td><td><code>speed_limit_count</code></td><td>速度规则违规次数，保留为可解释惩罚。</td></tr>
-          <tr><td>3</td><td><code>mean_mini_driving_score</code></td><td>路线完成度乘所有违规惩罚，用于防止完全忽略速度。</td></tr>
+          <tr><th>证据</th><th>结果</th><th>解释</th></tr>
+          <tr><td><code>cls_mean rollout aux</code> 离线诊断</td><td>lane MAE 0.024m，corr 0.915；control sign acc 0.858。</td><td>常规验证集看起来可用，但没有正向大偏移尾部样本。</td></tr>
+          <tr><td>修正 runtime <code>lane_keep</code> 后 100m gate</td><td>mean IFD 11.73m，5/5 offroad，无碰撞/红灯/阻塞。</td><td>真实闭环暴露大正偏移下的符号错误。</td></tr>
+          <tr><td>trace 尾部</td><td>真实 lane offset 到 +1.7m/+1.8m，预测 <code>aux_lane_offset_m</code> 仍为负。</td><td>控制器按预测量继续给正 steering，车辆越偏越远。</td></tr>
+          <tr><td>失败帧 DAgger</td><td>334 帧；<code>|lane_offset| &gt; 0.5m</code> 占 41.9%；<code>|lane_offset| &gt; 1m</code> 占 23.7%。</td><td>新数据覆盖原验证集中缺失的闭环尾部。</td></tr>
+          <tr><td>代码修正</td><td><code>8239efe</code> 合并顶层 <code>lane_keep</code> 到运行时 eval config。</td><td>评估、诊断、DAgger teacher action 现在使用同一套控制参数。</td></tr>
         </table>
-        <div class="callout">实现更新：评估器支持 <code>speed_limit_as_infraction: false</code>，并新增 <code>stop_on_offroad</code> / <code>stop_on_red_light</code>。D1-A 会把速度从停表条件降级为软日志。</div>
       </section>
 
-      <section id="aux" data-kind="train">
-        <h2>Aux 决策</h2>
-        <div class="grid">
-          <div class="callout ok"><strong>主 baseline</strong><br><code>pred_loss + sigreg + action BC</code>。这保留 LeWM latent prediction 的核心，配置中 <code>use_aux_head: false</code>，不实例化也不计算 <code>aux</code>/<code>pred_aux</code>。</div>
-          <div class="callout"><strong>消融 baseline</strong><br><code>pred_loss + sigreg + action BC + aux + pred_aux</code>。只有闭环指标赢，才把它作为驾驶 adapter 报告。</div>
-        </div>
-        <p>判断：你对 aux 的质疑是成立的。V-JEPA/LeWM 这条线强调少监督和 latent dynamics，额外往 latent 上读车辆状态会把故事变成工程增强。下一组先跑 no-aux，aux 只作为对照。</p>
-      </section>
-
-      <section id="evidence" data-kind="all">
-        <h2>已有证据</h2>
+      <section id="wandb" data-kind="train">
+        <h2>W&B 和实时训练</h2>
         <table>
-          <tr><th>Run / Eval</th><th>结果</th><th>对 D1 的意义</th></tr>
+          <tr><th>Run</th><th>用途</th><th>状态</th></tr>
           <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_e5-20260522-042925-552fb819"><code>d0_tiny_h3_fs5_delta_predaux_e5</code></a></td>
-            <td>test loss 0.2147；throttle-only 190m pass；200m 约 191.75m off-road。</td>
-            <td>tiny 可以形成短程闭环，但道路边界/长程漂移仍是核心风险。</td>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_contr-20260524-141716-74c008af"><code>d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k</code></a></td>
+            <td><code>cls_mean</code> 表示 ViT CLS token 与 patch mean 拼接；<code>controlsign</code> 表示额外惩罚预测 lane/heading 导出的 steering 方向错误；<code>dagger</code> 表示加入闭环失败帧。</td>
+            <td><span class="tag warn">running</span> epoch 1 已开始，batch 256，W&B 在线，local CSV 同步写入。</td>
           </tr>
           <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_action_10k-20260522-103256-1a514e1e"><code>d0_tiny_h3_fs5_delta_predaux_action_10k</code></a></td>
-            <td>best val 0.1425；action loss 0.0201；pure action 约 24.84m 后速度违规。</td>
-            <td>action head 有可学信号，D1 需要把速度从主停表条件移开观察真实路面安全性。</td>
-          </tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d0_tiny_h3_fs5_delta_predaux_action_conflict_10k-20260522-205206-3b40dc67"><code>d0_tiny_h3_fs5_delta_predaux_action_conflict_10k</code></a></td>
-            <td>early stop step 5800；best candidate pure action 25.06m；六个候选 eval 都 0 collision / 0 off-road / 0 red / 0 blocked，全部因 speed_limit_count 失败。</td>
-            <td>旧指标已经把速度放得过重；D1 会重新测道路安全距离。</td>
-          </tr>
-          <tr>
-            <td><code>d1_tiny_h3_fs5_core_action_noaux_20k</code></td>
-            <td>no-aux tiny early-stop at step 8760；total-best 23.19m；action-best 29.77m；D1-A 6 routes 全部 off-road。逐帧 contact sheet：<a href="outputs_d1_eval_total_policyfix_contact_sheet.jpg">total-best</a>、<a href="outputs_d1_eval_best_action_policyfix_contact_sheet.jpg">action-best</a>。</td>
-            <td>小范围单天气任务未成功；下一步查 action decoding、BC baseline、recovery data 和 route command。</td>
-          </tr>
-          <tr>
-            <td><code>d1_city_free_drive_lane_keep_1km</code></td>
-            <td>full-6 lane_keep 控制器 1km eval：5/6 路线干净通过，spawn 8 在 231.62m off-road；contact sheet：<a href="outputs_d1_eval_lane_keep_1km_contact_sheet.jpg">lane_keep 1km</a>。</td>
-            <td>评估器和五条简单城市路线可支持 1km 目标；spawn 8 保留为后续压力测试。</td>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_8k-20260524-130854-9040b83a"><code>d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_8k</code></a></td>
+            <td>上一版只加 <code>cls_mean</code> pooling 与 rollout DAgger，没有 control-sign loss。</td>
+            <td><span class="tag bad">failed gate</span> 100m gate 5/5 offroad。</td>
           </tr>
         </table>
       </section>
 
-      <section id="matrix" data-kind="all">
-        <h2>实验矩阵</h2>
-        <table>
-          <tr><th>顺序</th><th>工件</th><th>目标</th><th>状态</th></tr>
-          <tr><td>1</td><td><code>configs/d1_city_free_drive.yaml</code></td><td>pilot 采集 60 episodes x 40s / 6 routes / no traffic / green lights，约 48k frames。</td><td><span class="tag good">done</span></td></tr>
-          <tr><td>2</td><td><code>outputs/qc_d1_city_free_drive</code></td><td>逐帧 QC + contact sheet 人工检查。</td><td><span class="tag good">done</span></td></tr>
-          <tr><td>3</td><td><code>train_d1_tiny_core_action_noaux_20k.yaml</code></td><td>主 baseline：no-aux tiny action policy。</td><td><span class="tag bad">failed gate</span></td></tr>
-          <tr><td>4</td><td><code>eval_d1_city_free_drive_model_action.yaml</code></td><td>D1-A 500m 安全距离评估；total-best 23.19m，action-best 29.77m。</td><td><span class="tag bad">done / fail</span></td></tr>
-          <tr><td>5</td><td><code>eval_d1_city_free_drive_lane_keep_1km.yaml</code></td><td>full-6 控制器 1km gate；5/6 pass，spawn 8 failed。</td><td><span class="tag warn">done / split</span></td></tr>
-          <tr><td>6</td><td><code>train_d1_tiny_action_only_bc_10k.yaml</code></td><td>关掉 latent prediction 权重，先测纯 action BC 能否学到 steering feedback。</td><td><span class="tag">running</span></td></tr>
-          <tr><td>7</td><td><code>eval_d1_city_free_drive_model_action_1km_simple.yaml</code></td><td>当前 learned-policy 1km 主门控：五条控制器验证路线。</td><td><span class="tag">next</span></td></tr>
-          <tr><td>8</td><td><code>train_d1_tiny_action_weighted_bc_10k.yaml</code></td><td>若普通 BC 仍 steering collapse，则加 steer component / active-steer 权重。</td><td><span class="tag">ready</span></td></tr>
-          <tr><td>9</td><td><code>D1-W weather mix</code></td><td>D1-simple-1km 成立后，用 Clear/Cloudy/Wet/SoftRain 多天气混训并按天气分开评估。</td><td><span class="tag warn">paused</span></td></tr>
-          <tr><td>10</td><td><code>ViT small</code></td><td>tiny 已有闭环信号后再放大；保持同一 no-aux 目标和同一评估套件。</td><td><span class="tag warn">paused</span></td></tr>
-        </table>
+      <section id="phases" data-kind="all">
+        <h2>阶段计划</h2>
+        <details open>
+          <summary>Phase 1: 横向闭环修复</summary>
+          <p>目标：让模型在 100m gate 上不再 10-20m 内离路。退出条件是 5/5 到达 100m 且 trace 中 predicted lane/heading 与 corrective steering 方向一致。</p>
+          <p>当前动作：训练 <code>controlsign</code> 配置；训练后先跑离线 tail diagnostic，再跑 100m gate。</p>
+        </details>
+        <details>
+          <summary>Phase 2: 1km no-traffic / green-light</summary>
+          <p>目标：在五条控制器验证路线跑满 1km。退出条件是 <code>mean_infraction_free_distance_m = 1000m</code> 且 5/5 primary safety success。</p>
+        </details>
+        <details>
+          <summary>Phase 3: 红绿灯</summary>
+          <p>目标：取消 <code>force_green_lights</code>，让 red-light violation 成为硬失败。只有 Phase 2 通过后进入。</p>
+        </details>
+        <details>
+          <summary>Phase 4: 多天气与更大 ViT</summary>
+          <p>目标：验证视觉鲁棒性或容量瓶颈。只有单天气 1km 有稳定成功后，混训天气和 ViT small/base 才有解释价值。</p>
+        </details>
       </section>
 
-      <section id="scaleout" data-kind="all">
-        <h2>扩展路线</h2>
-        <div class="grid">
-          <div class="callout bad"><strong>小范围 learned policy 未过</strong><br>D1 no-aux tiny 的 action-best 只有 29.77m，6/6 off-road。当前先修 action decoding 和 BC baseline。</div>
-          <div class="callout"><strong>天气鲁棒暂停</strong><br>D1-W 的 <code>ClearNoon</code>、<code>CloudyNoon</code>、<code>WetNoon</code>、<code>SoftRainNoon</code> 仍是后续路线，但只有单天气 D1-A 过门槛后启动。</div>
-          <div class="callout"><strong>模型放大暂停</strong><br>ViT small 只在 tiny 已经有闭环信号、并且失败像 capacity/visual robustness，而不是 action decoding 或任务接口错误时启动。</div>
-          <div class="callout"><strong>仍不加车</strong><br>车辆、行人、命令化变道进入 D2/D1-C；多天气阶段继续保持 no traffic，把变量隔离清楚。</div>
-        </div>
-      </section>
-
-      <section id="decoder" data-kind="train">
-        <h2>实验名解码</h2>
-        <table>
-          <tr><th>片段</th><th>含义</th></tr>
-          <tr><td><code>d1</code></td><td>无车城市街道自由行驶任务。</td></tr>
-          <tr><td><code>tiny</code></td><td>ViT tiny，先验证任务和控制接口。</td></tr>
-          <tr><td><code>h3</code></td><td>输入 3 个历史视觉状态。</td></tr>
-          <tr><td><code>fs5</code></td><td>CARLA 20Hz 控制每 5 帧合并，模型步长约 0.25s。</td></tr>
-          <tr><td><code>core_action</code></td><td>latent prediction + SIGReg + action behavior cloning。</td></tr>
-          <tr><td><code>noaux</code></td><td><code>use_aux_head: false</code>，不把车辆状态回归头放进主模型。</td></tr>
-          <tr><td><code>aux_ablation</code></td><td>同配置加回 <code>aux</code> 和 <code>pred_aux</code>，只用于对照。</td></tr>
-          <tr><td><code>20k</code></td><td>20,000 optimizer steps，上限明显高于旧的几百 step 观察窗口。</td></tr>
-        </table>
-      </section>
-
-      <section id="commands" data-kind="all">
+      <section id="commands" data-kind="train">
         <h2>关键命令</h2>
-        <pre><code class="language-bash">PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.carla_collect.collect_dataset \
-  --config configs/d1_city_free_drive.yaml
-
-PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.dataset_qc.validate_hdf5 \
-  --dataset data/d1_city_free_drive/carla_d1_city_free_drive.h5 \
-  --out-dir outputs/qc_d1_city_free_drive \
-  --strict
-
-PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.dataset_qc.export_fast_hdf5 \
-  --src data/d1_city_free_drive/carla_d1_city_free_drive.h5 \
-  --dst data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5 \
-  --chunk-frames 256 \
-  --overwrite
-
-PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
-  --config configs/train_d1_tiny_core_action_noaux_20k.yaml \
-  --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5 \
-  --batch-size 256 \
-  --num-workers 4 \
-  --max-steps 20000 \
-  --output-dir outputs/d1_tiny_h3_fs5_core_action_noaux_20k \
-  --run-name d1_tiny_h3_fs5_core_action_noaux_20k
-
-PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d1_city_free_drive_lane_keep_1km.yaml
-
-PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
-  --config configs/train_d1_tiny_action_only_bc_10k.yaml \
-  --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5
-
-PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d1_city_free_drive_model_action_1km_simple.yaml \
-  --checkpoint outputs/d1_tiny_h3_fs5_action_only_bc_10k/best.pt
-
-PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
-  --config configs/train_d1_tiny_action_weighted_bc_10k.yaml \
-  --dataset-path data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5</code></pre>
+        <h3>当前训练</h3>
+        <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_d1_tiny_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k.yaml</code></pre>
+        <h3>离线 tail diagnostic</h3>
+        <pre><code>PYTHONPATH=src .venv/bin/python scripts/analyze_aux_perception.py \
+  --train-config configs/train_d1_tiny_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k.yaml \
+  --checkpoint outputs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k/best.pt \
+  --eval-config configs/eval_d1_city_free_drive_model_rollout_lane_keep_clsmean_wide_noroute_rollout_dagger_controlsign_1km_simple.yaml \
+  --mode rollout --split val --batch-size 128 --max-batches 32</code></pre>
+        <h3>100m gate</h3>
+        <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d1_city_free_drive_model_rollout_lane_keep_clsmean_wide_noroute_rollout_dagger_controlsign_1km_simple.yaml \
+  --route-cap-m 100</code></pre>
       </section>
 
-      <section id="gates" data-kind="risk">
+      <section id="gates" data-kind="eval">
         <h2>Go / No-Go</h2>
-        <div class="grid">
-          <div class="callout"><strong>Current go</strong><br>控制器 simple-5 已经具备 1km 可达性；当前继续 action-only BC 训练并用 simple-1km 闭环评估。</div>
-          <div class="callout"><strong>Pause</strong><br>spawn 8 在控制器下 231.62m 离路；该路线进入 route-command/recovery 数据诊断，不作为第一阶段 learned-policy 成功门槛。</div>
-          <div class="callout bad"><strong>Stop</strong><br>CARLA timing guard 报外部 tick；W&B 缺失；no-aux 和 aux 都在 50m 内出现 primary safety failure。</div>
-          <div class="callout"><strong>Next diagnose</strong><br>对比专家/预测动作分布；若普通 BC 继续输出低方差 steering，启动 weighted steering BC；再根据闭环决定 recovery data 或 route command。</div>
-        </div>
+        <table>
+          <tr><th>Gate</th><th>Go</th><th>No-Go 动作</th></tr>
+          <tr><td>离线 tail</td><td>正/负大偏移都有样本；control sign acc ≥ 0.90；lane corr ≥ 0.75。</td><td>补采对应方向失败帧，或提高 control-sign / tail repeat 权重。</td></tr>
+          <tr><td>100m gate</td><td>5/5 clean 到 100m。</td><td>读取 trace，按失败方向生成下一批 DAgger；暂停 1km。</td></tr>
+          <tr><td>1km gate</td><td>5/5 clean 到 1000m。</td><td>先按路线和偏移方向定位失败；只有接近成功时再考虑 ViT small。</td></tr>
+          <tr><td>红绿灯</td><td>1km clean 且无 red-light violation。</td><td>加入 traffic-light state/stop-line data，而不是先加天气。</td></tr>
+        </table>
       </section>
 
       <section id="terms" data-kind="all">
         <h2>名词速查</h2>
         <table>
           <tr><th>Term</th><th>解释</th></tr>
-          <tr><td><code>Safety IFD</code></td><td>安全优先的 infraction-free distance；D1-A 中不因普通超速提前停表。</td></tr>
-          <tr><td><code>D1-simple-1km</code></td><td>五条控制器已验证的 Town03 路线，目标是 learned policy 在无车、绿灯下跑满 1000m。</td></tr>
-          <tr><td><code>D1-full-6</code></td><td>原始六路线压力测试；包含 spawn 8，用于 route command / recovery 诊断。</td></tr>
-          <tr><td><code>BC</code></td><td>Behavior Cloning，直接监督模型预测 expert action，用来判断数据和动作接口是否足够。</td></tr>
-          <tr><td><code>weighted BC</code></td><td>加权 Behavior Cloning；仍然直接预测 action，但提高 steer 和高转向样本的训练权重。</td></tr>
-          <tr><td><code>lane_keep</code></td><td>确定性车道保持控制器；它不是 learned policy，只用来验证路线和评估器是否可达。</td></tr>
-          <tr><td><code>primary safety failure</code></td><td>collision、off-road / roadside departure、blocked。</td></tr>
-          <tr><td><code>red-light</code></td><td>D1-B 开启真实信号灯后纳入 hard failure。</td></tr>
-          <tr><td><code>speed soft penalty</code></td><td>速度违规计数和扣分，但不主导第一轮 D1 安全距离。</td></tr>
-          <tr><td><code>aux</code></td><td>从当前 latent 读车辆速度、路程、车道偏移等状态的辅助头；下一组只做消融。</td></tr>
-          <tr><td><code>pred_aux</code></td><td>从预测 latent 读同一批状态；旧 D0 曾用于让预测 latent 更贴近控制变量。</td></tr>
-          <tr><td><code>action BC</code></td><td>从 latent 预测专家动作块，用于直接闭环控制。</td></tr>
-          <tr><td><code>W&B</code></td><td>Weights & Biases；所有认真训练从 process start 开始在线记录。</td></tr>
-          <tr><td><code>D1-W</code></td><td>无车、绿灯、同 routes 的多天气鲁棒性阶段；只在 D1-A 有闭环信号后启动。</td></tr>
-          <tr><td><code>policyfix</code></td><td>修复后的评估输出目录标记；表示 <code>--checkpoint</code> 没有覆盖 YAML 里的 <code>policy: model_action</code>。</td></tr>
+          <tr><td><code>LeWM</code></td><td>latent world model，用图像 latent 和动作预测未来 latent。</td></tr>
+          <tr><td><code>ViT tiny</code></td><td>当前小模型视觉编码器，参数和显存都较小，适合先验证任务定义。</td></tr>
+          <tr><td><code>cls_mean</code></td><td>把 ViT 的 CLS token 和 patch token 平均池化拼接，给 lane 几何更多空间信息。</td></tr>
+          <tr><td><code>aux</code></td><td>从当前图像 latent 读出 speed/lane/heading 等状态的辅助头。</td></tr>
+          <tr><td><code>pred_aux</code></td><td>从预测未来 latent 读出下一步状态，直接服务 rollout lane-keep。</td></tr>
+          <tr><td><code>controlsign</code></td><td>新增 loss：由预测 lane/heading 算出的 steering 必须与 teacher steering 同方向。</td></tr>
+          <tr><td><code>DAgger</code></td><td>把模型闭环失败时遇到的状态重新用 teacher 标注，再加入训练，修补分布偏移。</td></tr>
+          <tr><td><code>IFD</code></td><td>infraction-free distance，首次硬违规前行驶的距离。</td></tr>
+          <tr><td><code>W&B</code></td><td>Weights & Biases，用于在线记录 loss、验证指标、run 链接和配置。</td></tr>
         </table>
       </section>
     </main>
   </div>
   <script>
-    const content = document.getElementById('content');
+    const tabs = document.querySelectorAll('.tab');
+    const blocks = document.querySelectorAll('[data-kind]');
+    tabs.forEach(tab => tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const key = tab.dataset.filter;
+      blocks.forEach(block => block.classList.toggle('hidden-kind', key !== 'all' && block.dataset.kind !== key && block.dataset.kind !== 'all'));
+    }));
+
     const search = document.getElementById('search');
     const count = document.getElementById('count');
+    const prev = document.getElementById('prev');
+    const next = document.getElementById('next');
+    const content = document.getElementById('content');
     let hits = [];
     let current = -1;
 
     function clearMarks() {
-      content.querySelectorAll('mark.search-hit').forEach(mark => {
-        mark.replaceWith(document.createTextNode(mark.textContent));
-      });
+      content.querySelectorAll('mark.search-hit').forEach(mark => mark.replaceWith(document.createTextNode(mark.textContent)));
       content.normalize();
-    }
-    function markText(node, query) {
-      const text = node.nodeValue;
-      const lower = text.toLowerCase();
-      const q = query.toLowerCase();
-      let index = lower.indexOf(q);
-      if (index < 0) return;
-      const frag = document.createDocumentFragment();
-      let last = 0;
-      while (index >= 0) {
-        frag.appendChild(document.createTextNode(text.slice(last, index)));
-        const mark = document.createElement('mark');
-        mark.className = 'search-hit';
-        mark.textContent = text.slice(index, index + query.length);
-        frag.appendChild(mark);
-        last = index + query.length;
-        index = lower.indexOf(q, last);
-      }
-      frag.appendChild(document.createTextNode(text.slice(last)));
-      node.replaceWith(frag);
-    }
-    function doSearch() {
-      clearMarks();
-      const q = search.value.trim();
       hits = [];
       current = -1;
-      if (!q) { count.textContent = '0'; return; }
+      count.textContent = '0';
+    }
+
+    function markText(node, query) {
+      const lower = node.nodeValue.toLowerCase();
+      const q = query.toLowerCase();
+      let idx = lower.indexOf(q);
+      if (idx < 0) return;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      while (idx >= 0) {
+        frag.append(node.nodeValue.slice(last, idx));
+        const mark = document.createElement('mark');
+        mark.className = 'search-hit';
+        mark.textContent = node.nodeValue.slice(idx, idx + query.length);
+        frag.append(mark);
+        hits.push(mark);
+        last = idx + query.length;
+        idx = lower.indexOf(q, last);
+      }
+      frag.append(node.nodeValue.slice(last));
+      node.replaceWith(frag);
+    }
+
+    function runSearch() {
+      clearMarks();
+      const query = search.value.trim();
+      if (!query) return;
       const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
         acceptNode(node) {
-          if (!node.nodeValue.toLowerCase().includes(q.toLowerCase())) return NodeFilter.FILTER_REJECT;
-          if (node.parentElement && ['SCRIPT', 'STYLE', 'MARK'].includes(node.parentElement.tagName)) return NodeFilter.FILTER_REJECT;
+          if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+          if (node.parentElement && node.parentElement.closest('script, style')) return NodeFilter.FILTER_REJECT;
           return NodeFilter.FILTER_ACCEPT;
         }
       });
       const nodes = [];
       while (walker.nextNode()) nodes.push(walker.currentNode);
-      nodes.forEach(node => markText(node, q));
-      hits = Array.from(content.querySelectorAll('mark.search-hit'));
+      nodes.forEach(node => markText(node, query));
       count.textContent = String(hits.length);
-      jump(0);
+      if (hits.length) jump(0);
     }
-    function jump(delta) {
+
+    function jump(index) {
       if (!hits.length) return;
       if (current >= 0) hits[current].classList.remove('current-hit');
-      current = (current + delta + hits.length) % hits.length;
+      current = (index + hits.length) % hits.length;
       hits[current].classList.add('current-hit');
       hits[current].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      count.textContent = `${current + 1}/${hits.length}`;
     }
+
     let timer = null;
-    search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(doSearch, 100); });
-    document.getElementById('prev').addEventListener('click', () => jump(-1));
-    document.getElementById('next').addEventListener('click', () => jump(1));
-    document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const filter = tab.dataset.filter;
-      document.querySelectorAll('[data-kind]').forEach(el => {
-        const kind = el.dataset.kind;
-        el.classList.toggle('hidden-kind', filter !== 'all' && kind !== filter && kind !== 'all');
-      });
-    }));
+    search.addEventListener('input', () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(runSearch, 90);
+    });
+    prev.addEventListener('click', () => jump(current - 1));
+    next.addEventListener('click', () => jump(current + 1));
   </script>
 </body>
 </html>
 """
 
 
-def build(output: Path) -> Path:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(HTML, encoding="utf-8")
-    return output
-
-
 def main() -> None:
     args = parse_args()
-    print(build(args.output))
+    args.output.write_text(HTML, encoding="utf-8")
+    print(args.output)
 
 
 if __name__ == "__main__":
