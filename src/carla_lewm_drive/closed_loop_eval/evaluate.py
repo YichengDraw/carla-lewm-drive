@@ -447,8 +447,14 @@ def write_action_trace(output_dir: Path, episode_idx: int, rows: list[dict[str, 
         "throttle",
         "steer",
         "brake",
+        "pre_lane_offset_m",
+        "pre_heading_error_rad",
         "lane_offset_m",
         "heading_error_rad",
+        "aux_speed_mps",
+        "aux_lane_offset_m",
+        "aux_heading_error_rad",
+        "aux_control_steer",
         "offroad",
         "red_light",
         "speed_limit_violation",
@@ -768,6 +774,7 @@ def run_episode(
             current_transform = ego.get_transform()
             pre_lane_offset, pre_heading_error, _ = lane_metrics(carla, world_map, current_transform)
             current_speed = vehicle_speed(ego)
+            perception_aux: dict[str, float] | None = None
             if is_model_policy(policy):
                 assert model is not None and planner is not None
                 pixels = preprocess_pixels(image_history[-int(model.cfg.history_size) :], int(model.cfg.image_size), device)
@@ -821,6 +828,12 @@ def run_episode(
                     else max(0.0, aux_speed)
                 )
                 action = lane_keep_action(aux_lane_offset, aux_heading_error, speed_for_control, eval_cfg)
+                perception_aux = {
+                    "aux_speed_mps": aux_speed,
+                    "aux_lane_offset_m": aux_lane_offset,
+                    "aux_heading_error_rad": aux_heading_error,
+                    "aux_control_steer": float(action[1]),
+                }
                 block_actions = [action for _ in range(frameskip)]
             elif policy == "lane_keep":
                 action = lane_keep_action(pre_lane_offset, pre_heading_error, current_speed, eval_cfg)
@@ -895,27 +908,30 @@ def run_episode(
                     count_as_first_infraction=bool(eval_cfg.get("speed_limit_as_infraction", True)),
                 )
                 if bool(eval_cfg.get("save_action_trace", True)):
-                    action_trace.append(
-                        {
-                            "step": int(step),
-                            "carla_frame": int(frame_id),
-                            "sim_time_s": float(sim_time),
-                            "sim_delta_s": float(sim_delta),
-                            "wall_delta_s": float(0.0 if last_wall_time is None else wall_time - last_wall_time),
-                            "route_progress_m": float(acc.route_progress_m),
-                            "speed_mps": float(speed),
-                            "throttle": float(control.throttle),
-                            "steer": float(control.steer),
-                            "brake": float(control.brake),
-                            "lane_offset_m": float(lane_offset),
-                            "heading_error_rad": float(heading_error),
-                            "offroad": int(bool(offroad)),
-                            "red_light": int(bool(red_light)),
-                            "speed_limit_violation": int(bool(speed_limit_violation)),
-                            "blocked": int(bool(blocked)),
-                            "collision_count": int(acc.collision_count),
-                        }
-                    )
+                    trace_row = {
+                        "step": int(step),
+                        "carla_frame": int(frame_id),
+                        "sim_time_s": float(sim_time),
+                        "sim_delta_s": float(sim_delta),
+                        "wall_delta_s": float(0.0 if last_wall_time is None else wall_time - last_wall_time),
+                        "route_progress_m": float(acc.route_progress_m),
+                        "speed_mps": float(speed),
+                        "throttle": float(control.throttle),
+                        "steer": float(control.steer),
+                        "brake": float(control.brake),
+                        "pre_lane_offset_m": float(pre_lane_offset),
+                        "pre_heading_error_rad": float(pre_heading_error),
+                        "lane_offset_m": float(lane_offset),
+                        "heading_error_rad": float(heading_error),
+                        "offroad": int(bool(offroad)),
+                        "red_light": int(bool(red_light)),
+                        "speed_limit_violation": int(bool(speed_limit_violation)),
+                        "blocked": int(bool(blocked)),
+                        "collision_count": int(acc.collision_count),
+                    }
+                    if perception_aux is not None:
+                        trace_row.update(perception_aux)
+                    action_trace.append(trace_row)
                 last_sim_time = sim_time
                 last_wall_time = wall_time
                 maybe_store_frame(output_dir, frames, rgb, episode=episode_idx, step=step, eval_cfg=eval_cfg)
