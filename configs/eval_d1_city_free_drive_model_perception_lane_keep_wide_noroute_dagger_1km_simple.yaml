@@ -1,0 +1,67 @@
+eval:
+  label: d1_city_free_drive_model_perception_lane_keep_wide_noroute_dagger_1km_simple
+  policy: model_perception_lane_keep
+  dataset_path: data/d1_city_free_drive_long_recovery/carla_d1_city_free_drive_long_recovery_fast.h5
+  checkpoint_path: outputs/d1_tiny_h3_fs5_aux_lane_perception_wide_noroute_dagger_8k/best.pt
+  output_dir: outputs/d1_eval_aux_lane_perception_wide_noroute_dagger_1km_simple
+  host: 127.0.0.1
+  port: 2100
+  timeout_s: 30.0
+  town: Town03
+  load_world: true
+  fixed_delta_seconds: 0.05
+  traffic_manager_port: 8100
+  traffic_manager_seed: 20260531
+  weather: ClearNoon
+  force_green_lights: true
+  route_spawn_indices: [3, 4, 6, 10, 12]
+  route_cap_m: 1000.0
+  target_speed_kmh: 16.2
+  max_episode_seconds: 280.0
+  eval_episodes: 5
+  blocked_speed_mps: 0.1
+  blocked_seconds: 3.0
+  blocked_grace_seconds: 5.0
+  max_sim_delta_multiplier: 2.5
+  red_light_speed_threshold_mps: 0.2
+  speed_limit_kmh: 35.0
+  speed_limit_seconds: 2.0
+  speed_limit_as_infraction: false
+  stop_on_collision: true
+  stop_on_offroad: true
+  stop_on_red_light: true
+  stop_on_blocked: true
+  stop_on_speed_limit: false
+  save_contact_sheet: true
+  contact_sheet_every: 80
+  max_contact_sheet_frames: 80
+  save_frames: false
+  save_action_trace: true
+  exclusive_throttle_brake: true
+  model_warmup_action: [0.30, 0.0, 0.0]
+  perception_lane_keep_use_true_speed: true
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+lane_keep:
+  target_speed_mps: 4.5
+  throttle: 0.30
+  speed_kp: 0.05
+  throttle_min: 0.12
+  throttle_max: 0.48
+  overspeed_margin_mps: 1.0
+  brake_kp: 0.10
+  steer_limit: 0.35
+  steer_bias: 0.0
+  lane_offset_gain: 0.35
+  heading_error_gain: 1.2
