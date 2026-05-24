@@ -1,0 +1,187 @@
+from __future__ import annotations
+
+import argparse
+import json
+import math
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+from carla_lewm_drive.closed_loop_eval.evaluate import load_model
+from carla_lewm_drive.config import load_yaml
+from carla_lewm_drive.driving_lewm.data import CarlaSequenceDataset, build_splits
+from carla_lewm_drive.driving_lewm.model import AUX_COMPONENTS, DrivingLeWM
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Measure image-to-aux lane perception quality for driving LeWM checkpoints.")
+    parser.add_argument("--train-config", type=Path, default=Path("configs/train_d1_tiny_aux_lane_perception_long_recovery_mixed_8k.yaml"))
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--eval-config", type=Path, default=Path("configs/eval_d1_city_free_drive_model_perception_lane_keep_long_recovery_mixed_1km_simple.yaml"))
+    parser.add_argument("--split", choices=("train", "val", "test", "all"), default="val")
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--max-batches", type=int, default=32)
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs/analysis/aux_perception"))
+    return parser.parse_args()
+
+
+def finite_corr(a: np.ndarray, b: np.ndarray) -> float | None:
+    a = np.asarray(a, dtype=np.float64).reshape(-1)
+    b = np.asarray(b, dtype=np.float64).reshape(-1)
+    mask = np.isfinite(a) & np.isfinite(b)
+    if int(mask.sum()) < 3:
+        return None
+    a = a[mask]
+    b = b[mask]
+    if float(a.std()) < 1e-8 or float(b.std()) < 1e-8:
+        return None
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def quantiles(x: np.ndarray) -> dict[str, float]:
+    arr = np.asarray(x, dtype=np.float64).reshape(-1)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return {}
+    qs = np.quantile(arr, [0.0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1.0])
+    keys = ("min", "p01", "p05", "p25", "p50", "p75", "p95", "p99", "max")
+    return {k: float(v) for k, v in zip(keys, qs, strict=True)}
+
+
+def component_metrics(pred: np.ndarray, target: np.ndarray) -> dict[str, Any]:
+    err = np.asarray(pred, dtype=np.float64) - np.asarray(target, dtype=np.float64)
+    return {
+        "mae": float(np.mean(np.abs(err))),
+        "rmse": float(np.sqrt(np.mean(np.square(err)))),
+        "bias": float(np.mean(err)),
+        "corr": finite_corr(pred, target),
+        "target": quantiles(target),
+        "pred": quantiles(pred),
+        "error": quantiles(err),
+    }
+
+
+def make_dataset(cfg: dict[str, Any], split: str):
+    data_cfg = cfg["data"]
+    paths = data_cfg.get("dataset_paths") or data_cfg.get("dataset_path")
+    if paths is None:
+        raise ValueError("data.dataset_path or data.dataset_paths is required")
+    if split == "all":
+        if isinstance(paths, list) and len(paths) != 1:
+            raise ValueError("--split all currently expects one dataset path")
+        path = Path(paths[0] if isinstance(paths, list) else paths)
+        return CarlaSequenceDataset(
+            path,
+            frameskip=int(data_cfg["frameskip"]),
+            history_size=int(data_cfg["history_size"]),
+            num_preds=int(data_cfg["num_preds"]),
+            image_size=int(data_cfg["image_size"]),
+        )
+    train, val, test, _ = build_splits(paths, data_cfg)
+    return {"train": train, "val": val, "test": test}[split]
+
+
+def lane_keep_steer_array(lane_offset: np.ndarray, heading_error: np.ndarray, eval_cfg: dict[str, Any]) -> np.ndarray:
+    lane_cfg = eval_cfg.get("lane_keep", {})
+    steer_bias = float(lane_cfg.get("steer_bias", 0.0))
+    lane_gain = float(lane_cfg.get("lane_offset_gain", 0.18))
+    heading_gain = float(lane_cfg.get("heading_error_gain", 1.0))
+    max_abs = float(lane_cfg.get("max_abs_steer", 0.6))
+    steer = steer_bias - lane_gain * lane_offset.astype(np.float64) - heading_gain * heading_error.astype(np.float64)
+    return np.clip(steer, -max_abs, max_abs)
+
+
+@torch.no_grad()
+def summarize(args: argparse.Namespace) -> dict[str, Any]:
+    cfg = load_yaml(args.train_config)
+    eval_cfg = load_yaml(args.eval_config)["eval"] if args.eval_config else {}
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = load_model(args.checkpoint).to(device).eval()
+    dataset = make_dataset(cfg, args.split)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
+
+    preds: list[np.ndarray] = []
+    targets: list[np.ndarray] = []
+    for step, batch in enumerate(loader, start=1):
+        if args.max_batches is not None and step > args.max_batches:
+            break
+        pixels = batch["pixels"].to(device)
+        route_id = batch.get("route_id")
+        if route_id is not None:
+            route_id = route_id.to(device)
+        pred = model.perceive_aux(pixels, route_id=route_id).detach().cpu()
+        target = DrivingLeWM.aux_target(batch, model.cfg.progress_mode)[:, -1].detach().cpu()
+        preds.append(pred.numpy())
+        targets.append(target.numpy())
+
+    pred_all = np.concatenate(preds, axis=0)
+    target_all = np.concatenate(targets, axis=0)
+    per_component = {
+        name: component_metrics(pred_all[:, i], target_all[:, i])
+        for i, name in enumerate(AUX_COMPONENTS)
+    }
+    pred_steer = lane_keep_steer_array(pred_all[:, 2], pred_all[:, 3], eval_cfg)
+    target_steer = lane_keep_steer_array(target_all[:, 2], target_all[:, 3], eval_cfg)
+    steer_err = pred_steer - target_steer
+    active = np.abs(target_steer) > 0.01
+    steer_summary = {
+        "mae": float(np.mean(np.abs(steer_err))),
+        "rmse": float(np.sqrt(np.mean(np.square(steer_err)))),
+        "bias": float(np.mean(steer_err)),
+        "corr": finite_corr(pred_steer, target_steer),
+        "sign_accuracy_abs_target_gt_0p01": float(np.mean(np.sign(pred_steer[active]) == np.sign(target_steer[active]))) if bool(np.any(active)) else None,
+        "target": quantiles(target_steer),
+        "pred": quantiles(pred_steer),
+        "error": quantiles(steer_err),
+    }
+    return {
+        "checkpoint": str(args.checkpoint),
+        "train_config": str(args.train_config),
+        "eval_config": str(args.eval_config) if args.eval_config else None,
+        "split": args.split,
+        "samples": int(pred_all.shape[0]),
+        "device": str(device),
+        "per_component": per_component,
+        "lane_control": steer_summary,
+    }
+
+
+def write_markdown(result: dict[str, Any], path: Path) -> None:
+    lane = result["per_component"]["lane_offset"]
+    heading = result["per_component"]["heading_error"]
+    control = result["lane_control"]
+    lines = [
+        "# Aux Perception Diagnostics",
+        "",
+        "## Verdict Inputs",
+        "",
+        f"- Samples: `{result['samples']}` from `{result['split']}`.",
+        f"- Lane offset MAE/RMSE: `{lane['mae']:.5f}` / `{lane['rmse']:.5f}` m; corr `{lane['corr']}`.",
+        f"- Heading error MAE/RMSE: `{heading['mae']:.5f}` / `{heading['rmse']:.5f}` rad; corr `{heading['corr']}`.",
+        f"- Induced lane-keep steering MAE/RMSE: `{control['mae']:.5f}` / `{control['rmse']:.5f}`; corr `{control['corr']}`.",
+        "",
+        "## Full JSON",
+        "",
+        "```json",
+        json.dumps(result, indent=2, sort_keys=True),
+        "```",
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main() -> None:
+    args = parse_args()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    result = summarize(args)
+    json_path = args.output_dir / "aux_perception_diagnostics.json"
+    md_path = args.output_dir / "aux_perception_diagnostics.md"
+    json_path.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+    write_markdown(result, md_path)
+    print(json_path)
+
+
+if __name__ == "__main__":
+    main()

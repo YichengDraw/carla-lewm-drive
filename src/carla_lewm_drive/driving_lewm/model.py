@@ -13,6 +13,17 @@ VIT_CONFIGS = {
     "base": {"hidden_size": 768, "num_hidden_layers": 12, "num_attention_heads": 12},
 }
 
+AUX_COMPONENTS = (
+    "speed",
+    "progress",
+    "lane_offset",
+    "heading_error",
+    "collision",
+    "offroad",
+    "red_light",
+    "blocked",
+)
+
 
 @dataclass(frozen=True)
 class DrivingLeWMConfig:
@@ -355,6 +366,13 @@ class DrivingLeWM(nn.Module):
         shaped = weights.reshape(*([1] * (raw.ndim - 1)), raw.shape[-1])
         return (raw * shaped).sum() / shaped.expand_as(raw).sum().clamp_min(1e-8)
 
+    @staticmethod
+    def aux_component_losses(pred: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
+        raw = F.smooth_l1_loss(pred.float(), target.float(), reduction="none")
+        reduce_dims = tuple(range(raw.ndim - 1))
+        values = raw.mean(dim=reduce_dims)
+        return {name: values[i] for i, name in enumerate(AUX_COMPONENTS)}
+
     def loss(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         out = self.forward(batch)
         pred_loss = F.mse_loss(out["pred_emb"], out["target_emb"])
@@ -364,6 +382,8 @@ class DrivingLeWM(nn.Module):
         aux_loss = zero
         pred_aux_loss = zero
         aux_total = zero
+        aux_parts = {name: zero for name in AUX_COMPONENTS}
+        pred_aux_parts = {name: zero for name in AUX_COMPONENTS}
         if self.aux_head is not None:
             aux_target = self.aux_target(batch, self.cfg.progress_mode)
             pred_aux_target = aux_target[:, 1 : self.cfg.history_size + 1].detach()
@@ -374,6 +394,8 @@ class DrivingLeWM(nn.Module):
                 self.cfg.aux_component_weights,
             )
             aux_total = aux_loss + self.cfg.pred_aux_weight * pred_aux_loss
+            aux_parts = self.aux_component_losses(out["aux"], aux_target)
+            pred_aux_parts = self.aux_component_losses(out["pred_aux"], pred_aux_target)
 
         action_target_all = batch["action"].float()
         action_target = action_target_all[:, -1] if self.cfg.use_temporal_action_head else action_target_all
@@ -416,6 +438,8 @@ class DrivingLeWM(nn.Module):
             "sigreg_loss": sigreg.detach(),
             "aux_loss": aux_loss.detach(),
             "pred_aux_loss": pred_aux_loss.detach(),
+            **{f"aux_{name}_loss": value.detach() for name, value in aux_parts.items()},
+            **{f"pred_aux_{name}_loss": value.detach() for name, value in pred_aux_parts.items()},
             "action_loss": action_loss.detach(),
             "pred_action_loss": pred_action_loss.detach(),
             "action_throttle_loss": action_parts["throttle"].detach(),
