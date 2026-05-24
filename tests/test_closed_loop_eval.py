@@ -18,6 +18,7 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     requires_model,
     resolve_policy,
     run_dry_eval,
+    runtime_eval_config,
     write_action_trace,
     write_metrics,
 )
@@ -173,6 +174,26 @@ def test_lane_keep_action_uses_speed_control_and_brake_when_overspeeding():
     assert slow.tolist() == pytest.approx([0.55, 0.0, 0.0])
     assert fast[0] == pytest.approx(0.0)
     assert fast[2] > 0.0
+
+
+def test_runtime_eval_config_merges_top_level_lane_keep():
+    cfg = {
+        "eval": {
+            "target_speed_kmh": 18.0,
+            "lane_keep": {"steer_limit": 0.2},
+        },
+        "lane_keep": {
+            "lane_offset_gain": 0.35,
+            "heading_error_gain": 1.2,
+            "steer_limit": 0.35,
+        },
+    }
+
+    merged = runtime_eval_config(cfg)
+
+    assert merged["lane_keep"]["lane_offset_gain"] == pytest.approx(0.35)
+    assert merged["lane_keep"]["heading_error_gain"] == pytest.approx(1.2)
+    assert merged["lane_keep"]["steer_limit"] == pytest.approx(0.2)
 
 
 def test_model_speed_governor_caps_throttle_and_raises_brake():

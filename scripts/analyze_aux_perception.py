@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from carla_lewm_drive.closed_loop_eval.evaluate import load_model
+from carla_lewm_drive.closed_loop_eval.evaluate import load_model, runtime_eval_config
 from carla_lewm_drive.config import load_yaml
 from carla_lewm_drive.driving_lewm.data import CarlaSequenceDataset, build_splits
 from carla_lewm_drive.driving_lewm.model import AUX_COMPONENTS, DrivingLeWM
@@ -146,7 +146,7 @@ def lane_keep_steer_array(lane_offset: np.ndarray, heading_error: np.ndarray, ev
 @torch.no_grad()
 def summarize(args: argparse.Namespace) -> dict[str, Any]:
     cfg = load_yaml(args.train_config)
-    eval_cfg = load_yaml(args.eval_config)["eval"] if args.eval_config else {}
+    eval_cfg = runtime_eval_config(load_yaml(args.eval_config)) if args.eval_config else {}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_model(args.checkpoint).to(device).eval()
     dataset = make_dataset(cfg, args.split)

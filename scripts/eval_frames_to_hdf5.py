@@ -10,7 +10,7 @@ import h5py
 import numpy as np
 from PIL import Image
 
-from carla_lewm_drive.closed_loop_eval.evaluate import lane_keep_action
+from carla_lewm_drive.closed_loop_eval.evaluate import lane_keep_action, runtime_eval_config
 from carla_lewm_drive.config import load_yaml
 
 
@@ -135,7 +135,7 @@ def write_hdf5(data: dict[str, np.ndarray], path: Path, *, overwrite: bool) -> N
 
 def main() -> None:
     args = parse_args()
-    cfg = load_yaml(args.eval_config)["eval"]
+    cfg = runtime_eval_config(load_yaml(args.eval_config))
     data = convert(args.eval_dir, cfg)
     write_hdf5(data, args.output, overwrite=args.overwrite)
     report = {

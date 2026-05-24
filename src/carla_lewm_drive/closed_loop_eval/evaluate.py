@@ -140,6 +140,23 @@ def apply_cli_overrides(cfg: dict[str, Any], args: argparse.Namespace) -> None:
         eval_cfg["save_frames"] = True
 
 
+def runtime_eval_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    if "eval" not in cfg:
+        return dict(cfg)
+    eval_cfg = dict(cfg["eval"])
+    if "lane_keep" in cfg:
+        lane_keep = dict(cfg["lane_keep"])
+        lane_keep.update(eval_cfg.get("lane_keep", {}))
+        eval_cfg["lane_keep"] = lane_keep
+    return eval_cfg
+
+
+def runtime_closed_loop_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(cfg)
+    merged["eval"] = runtime_eval_config(cfg)
+    return merged
+
+
 def action_dim_to_frameskip(action_dim: int) -> int:
     action_dim = int(action_dim)
     if action_dim <= 0 or action_dim % 3 != 0:
@@ -375,7 +392,7 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
 
 
 def run_dry_eval(cfg: dict[str, Any], checkpoint_path: Path | None, policy: str) -> dict[str, Any]:
-    eval_cfg = cfg["eval"]
+    eval_cfg = runtime_eval_config(cfg)
     out: dict[str, Any] = {
         "status": "config_loaded",
         "policy": policy,
@@ -729,7 +746,7 @@ def run_episode(
     planner: CEMPlanner | None,
     device: torch.device,
 ) -> tuple[DrivingEpisodeMetrics, list[tuple[np.ndarray, str]]]:
-    eval_cfg = cfg["eval"]
+    eval_cfg = runtime_eval_config(cfg)
     timeout_s = float(eval_cfg.get("timeout_s", 10.0))
     fixed_delta = float(eval_cfg["fixed_delta_seconds"])
     max_steps = int(round(float(eval_cfg["max_episode_seconds"]) / fixed_delta))
@@ -1019,6 +1036,7 @@ def run_episode(
 
 
 def run_closed_loop_eval(cfg: dict[str, Any], checkpoint_path: Path | None, policy: str) -> dict[str, Any]:
+    cfg = runtime_closed_loop_config(cfg)
     eval_cfg = cfg["eval"]
     output_dir = Path(eval_cfg["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
