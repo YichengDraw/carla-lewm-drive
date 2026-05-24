@@ -1,0 +1,67 @@
+scenario:
+  label: D1-city-free-drive-wide-recovery-lanekeep
+  description: Wide no-traffic Town03 recovery dataset for camera lane/heading perception under off-center states.
+  carla_version: 0.9.16
+  host: 127.0.0.1
+  port: 2100
+  timeout_s: 30.0
+  town: Town03
+  fixed_delta_seconds: 0.05
+  synchronous_mode: true
+  traffic_manager_port: 8100
+  traffic_manager_seed: 20260529
+  vehicles: 0
+  walkers: 0
+  weather: ClearNoon
+  force_green_lights: true
+  record_carla_log: false
+  cleanup_after_success: true
+  teacher_policy: lane_keep
+  spawn_point_indices: [3, 4, 6, 10, 12]
+  episodes: 105
+  episode_seconds: 5.0
+  target_speed_kmh: 12.6
+  recovery:
+    enabled: true
+    initial_lateral_offsets_m: [-1.2, -0.8, -0.4, 0.0, 0.4, 0.8, 1.2]
+    initial_yaw_offsets_deg: [-12.0, 0.0, 12.0]
+  quality_gate:
+    enabled: true
+    max_attempts: 240
+    min_progress_m: 4.0
+    max_collision_frames: 0
+    max_offroad_fraction: 0.40
+    max_red_light_fraction: 0.0
+    max_blocked_fraction: 0.50
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+lane_keep:
+  target_speed_mps: 3.5
+  throttle: 0.26
+  speed_kp: 0.05
+  throttle_min: 0.08
+  throttle_max: 0.42
+  overspeed_margin_mps: 1.0
+  brake_kp: 0.10
+  steer_limit: 0.55
+  steer_bias: 0.0
+  lane_offset_gain: 0.45
+  heading_error_gain: 1.8
+
+output:
+  dataset_path: data/d1_city_free_drive_wide_recovery/carla_d1_city_free_drive_wide_recovery_fast.h5
+  metadata_path: data/d1_city_free_drive_wide_recovery/metadata.json
+  recorder_path: data/d1_city_free_drive_wide_recovery/carla_d1_city_free_drive_wide_recovery.log
+  preview_dir: data/d1_city_free_drive_wide_recovery/previews
+  pixel_compression: none
