@@ -333,6 +333,13 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
             if model_cfg.get("aux_component_weights") is not None
             else None
         ),
+        aux_control_weight=float(model_cfg.get("aux_control_weight", 0.0)),
+        pred_aux_control_weight=float(model_cfg.get("pred_aux_control_weight", 1.0)),
+        aux_control_sign_weight=float(model_cfg.get("aux_control_sign_weight", 0.0)),
+        aux_control_active_threshold=float(model_cfg.get("aux_control_active_threshold", 0.02)),
+        aux_control_lane_gain=float(model_cfg.get("aux_control_lane_gain", 0.35)),
+        aux_control_heading_gain=float(model_cfg.get("aux_control_heading_gain", 1.2)),
+        aux_control_steer_limit=float(model_cfg.get("aux_control_steer_limit", 0.35)),
         action_weight=float(model_cfg.get("action_weight", 0.0)),
         pred_action_weight=float(model_cfg.get("pred_action_weight", 1.0)),
         action_conflict_weight=float(model_cfg.get("action_conflict_weight", 0.0)),

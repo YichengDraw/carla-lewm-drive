@@ -54,6 +54,27 @@ def test_aux_regression_loss_can_weight_lane_feedback_terms():
     assert float(loss) == pytest.approx(expected)
 
 
+def test_aux_control_loss_penalizes_wrong_steering_direction():
+    target = torch.zeros(1, 1, 8)
+    same_direction = torch.zeros(1, 1, 8)
+    wrong_direction = torch.zeros(1, 1, 8)
+    target[..., 2] = 1.0
+    same_direction[..., 2] = 0.2
+    wrong_direction[..., 2] = -0.2
+
+    kwargs = dict(
+        lane_gain=0.5,
+        heading_gain=0.0,
+        steer_limit=1.0,
+        sign_weight=2.0,
+        active_threshold=0.05,
+    )
+    same_loss = DrivingLeWM.aux_control_loss(same_direction, target, **kwargs)
+    wrong_loss = DrivingLeWM.aux_control_loss(wrong_direction, target, **kwargs)
+
+    assert float(wrong_loss) > float(same_loss)
+
+
 def test_progress_signal_rejects_unknown_mode():
     route_progress = torch.zeros(1, 2, 1)
 

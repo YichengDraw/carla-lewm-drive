@@ -65,6 +65,54 @@ def component_metrics(pred: np.ndarray, target: np.ndarray) -> dict[str, Any]:
     }
 
 
+def sign_accuracy(pred: np.ndarray, target: np.ndarray, *, active_threshold: float) -> float | None:
+    pred = np.asarray(pred, dtype=np.float64).reshape(-1)
+    target = np.asarray(target, dtype=np.float64).reshape(-1)
+    mask = np.isfinite(pred) & np.isfinite(target) & (np.abs(target) > float(active_threshold))
+    if not bool(np.any(mask)):
+        return None
+    return float(np.mean(np.sign(pred[mask]) == np.sign(target[mask])))
+
+
+def masked_tail_summary(
+    *,
+    mask: np.ndarray,
+    total_count: int,
+    pred_all: np.ndarray,
+    target_all: np.ndarray,
+    pred_steer: np.ndarray,
+    target_steer: np.ndarray,
+) -> dict[str, Any]:
+    mask = np.asarray(mask, dtype=bool).reshape(-1)
+    count = int(mask.sum())
+    out: dict[str, Any] = {"count": count, "fraction": float(count / max(1, int(total_count)))}
+    if count == 0:
+        return out
+    pred_lane = pred_all[mask, 2]
+    target_lane = target_all[mask, 2]
+    pred_heading = pred_all[mask, 3]
+    target_heading = target_all[mask, 3]
+    ps = pred_steer[mask]
+    ts = target_steer[mask]
+    out.update(
+        {
+            "lane_target": quantiles(target_lane),
+            "lane_pred": quantiles(pred_lane),
+            "lane_error": quantiles(pred_lane - target_lane),
+            "heading_target": quantiles(target_heading),
+            "heading_pred": quantiles(pred_heading),
+            "control_target": quantiles(ts),
+            "control_pred": quantiles(ps),
+            "control_error": quantiles(ps - ts),
+            "lane_sign_accuracy_abs_target_gt_0p05": sign_accuracy(pred_lane, target_lane, active_threshold=0.05),
+            "control_sign_accuracy_abs_target_gt_0p02": sign_accuracy(ps, ts, active_threshold=0.02),
+            "pred_control_opposes_lane_fraction": float(np.mean(ps * target_lane < 0.0)),
+            "mean_pred_corrective_against_lane": float(np.mean(-ps * target_lane)),
+        }
+    )
+    return out
+
+
 def make_dataset(cfg: dict[str, Any], split: str):
     data_cfg = cfg["data"]
     paths = data_cfg.get("dataset_paths") or data_cfg.get("dataset_path")
@@ -90,7 +138,7 @@ def lane_keep_steer_array(lane_offset: np.ndarray, heading_error: np.ndarray, ev
     steer_bias = float(lane_cfg.get("steer_bias", 0.0))
     lane_gain = float(lane_cfg.get("lane_offset_gain", 0.18))
     heading_gain = float(lane_cfg.get("heading_error_gain", 1.0))
-    max_abs = float(lane_cfg.get("max_abs_steer", 0.6))
+    max_abs = float(lane_cfg.get("steer_limit", lane_cfg.get("max_abs_steer", 0.6)))
     steer = steer_bias - lane_gain * lane_offset.astype(np.float64) - heading_gain * heading_error.astype(np.float64)
     return np.clip(steer, -max_abs, max_abs)
 
@@ -147,6 +195,29 @@ def summarize(args: argparse.Namespace) -> dict[str, Any]:
         "pred": quantiles(pred_steer),
         "error": quantiles(steer_err),
     }
+    tail_masks = {
+        "lane_offset_gt_0p5": target_all[:, 2] > 0.5,
+        "lane_offset_gt_1p0": target_all[:, 2] > 1.0,
+        "lane_offset_lt_minus_0p5": target_all[:, 2] < -0.5,
+        "lane_offset_lt_minus_1p0": target_all[:, 2] < -1.0,
+        "abs_lane_offset_gt_0p5": np.abs(target_all[:, 2]) > 0.5,
+        "abs_lane_offset_gt_1p0": np.abs(target_all[:, 2]) > 1.0,
+        "target_control_gt_0p05": target_steer > 0.05,
+        "target_control_lt_minus_0p05": target_steer < -0.05,
+        "abs_target_control_gt_0p05": np.abs(target_steer) > 0.05,
+        "abs_target_control_gt_0p10": np.abs(target_steer) > 0.10,
+    }
+    tail_summaries = {
+        name: masked_tail_summary(
+            mask=mask,
+            total_count=int(pred_all.shape[0]),
+            pred_all=pred_all,
+            target_all=target_all,
+            pred_steer=pred_steer,
+            target_steer=target_steer,
+        )
+        for name, mask in tail_masks.items()
+    }
     return {
         "checkpoint": str(args.checkpoint),
         "train_config": str(args.train_config),
@@ -157,6 +228,7 @@ def summarize(args: argparse.Namespace) -> dict[str, Any]:
         "device": str(device),
         "per_component": per_component,
         "lane_control": steer_summary,
+        "tail_summaries": tail_summaries,
     }
 
 
@@ -174,13 +246,31 @@ def write_markdown(result: dict[str, Any], path: Path) -> None:
         f"- Lane offset MAE/RMSE: `{lane['mae']:.5f}` / `{lane['rmse']:.5f}` m; corr `{lane['corr']}`.",
         f"- Heading error MAE/RMSE: `{heading['mae']:.5f}` / `{heading['rmse']:.5f}` rad; corr `{heading['corr']}`.",
         f"- Induced lane-keep steering MAE/RMSE: `{control['mae']:.5f}` / `{control['rmse']:.5f}`; corr `{control['corr']}`.",
+        f"- Control sign accuracy (`|target steer| > 0.01`): `{control['sign_accuracy_abs_target_gt_0p01']}`.",
         "",
+        "## Tail Checks",
+        "",
+        "| Slice | Count | Pred lane p50 | Target lane p50 | Control sign acc | Corrective steer mean |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for name, tail in result.get("tail_summaries", {}).items():
+        pred_lane = tail.get("lane_pred", {}).get("p50")
+        target_lane = tail.get("lane_target", {}).get("p50")
+        sign_acc = tail.get("control_sign_accuracy_abs_target_gt_0p02")
+        corrective = tail.get("mean_pred_corrective_against_lane")
+        lines.append(
+            f"| `{name}` | `{tail.get('count', 0)}` | `{pred_lane}` | `{target_lane}` | `{sign_acc}` | `{corrective}` |"
+        )
+    lines.extend(
+        [
+            "",
         "## Full JSON",
         "",
         "```json",
         json.dumps(result, indent=2, sort_keys=True),
         "```",
-    ]
+        ]
+    )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

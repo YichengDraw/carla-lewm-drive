@@ -44,6 +44,13 @@ class DrivingLeWMConfig:
     aux_weight: float = 0.2
     pred_aux_weight: float = 1.0
     aux_component_weights: tuple[float, float, float, float, float, float, float, float] | None = None
+    aux_control_weight: float = 0.0
+    pred_aux_control_weight: float = 1.0
+    aux_control_sign_weight: float = 0.0
+    aux_control_active_threshold: float = 0.02
+    aux_control_lane_gain: float = 0.35
+    aux_control_heading_gain: float = 1.2
+    aux_control_steer_limit: float = 0.35
     action_weight: float = 0.0
     pred_action_weight: float = 1.0
     action_component_weights: tuple[float, float, float] | None = None
@@ -393,6 +400,55 @@ class DrivingLeWM(nn.Module):
         values = raw.mean(dim=reduce_dims)
         return {name: values[i] for i, name in enumerate(AUX_COMPONENTS)}
 
+    @staticmethod
+    def aux_control_steer(
+        aux: torch.Tensor,
+        *,
+        lane_gain: float,
+        heading_gain: float,
+        steer_limit: float,
+    ) -> torch.Tensor:
+        steer = -float(lane_gain) * aux.float()[..., 2] - float(heading_gain) * aux.float()[..., 3]
+        limit = abs(float(steer_limit))
+        if limit > 0.0:
+            steer = torch.clamp(steer, -limit, limit)
+        return steer
+
+    @classmethod
+    def aux_control_loss(
+        cls,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        *,
+        lane_gain: float,
+        heading_gain: float,
+        steer_limit: float,
+        sign_weight: float,
+        active_threshold: float,
+    ) -> torch.Tensor:
+        pred_steer = cls.aux_control_steer(
+            pred,
+            lane_gain=lane_gain,
+            heading_gain=heading_gain,
+            steer_limit=steer_limit,
+        )
+        target_steer = cls.aux_control_steer(
+            target,
+            lane_gain=lane_gain,
+            heading_gain=heading_gain,
+            steer_limit=steer_limit,
+        )
+        loss = F.smooth_l1_loss(pred_steer, target_steer)
+        if float(sign_weight) > 0.0:
+            threshold = max(0.0, float(active_threshold))
+            active = target_steer.abs() >= threshold
+            if bool(active.any()):
+                direction = torch.sign(target_steer[active])
+                signed_pred = pred_steer[active] * direction
+                sign_penalty = F.relu(threshold - signed_pred).mean()
+                loss = loss + float(sign_weight) * sign_penalty
+        return loss
+
     def loss(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         out = self.forward(batch)
         pred_loss = F.mse_loss(out["pred_emb"], out["target_emb"])
@@ -404,6 +460,9 @@ class DrivingLeWM(nn.Module):
         aux_total = zero
         aux_parts = {name: zero for name in AUX_COMPONENTS}
         pred_aux_parts = {name: zero for name in AUX_COMPONENTS}
+        aux_control_loss = zero
+        pred_aux_control_loss = zero
+        aux_control_total = zero
         if self.aux_head is not None:
             aux_target = self.aux_target(batch, self.cfg.progress_mode)
             pred_aux_target = aux_target[:, 1 : self.cfg.history_size + 1].detach()
@@ -416,6 +475,26 @@ class DrivingLeWM(nn.Module):
             aux_total = aux_loss + self.cfg.pred_aux_weight * pred_aux_loss
             aux_parts = self.aux_component_losses(out["aux"], aux_target)
             pred_aux_parts = self.aux_component_losses(out["pred_aux"], pred_aux_target)
+            if float(self.cfg.aux_control_weight) > 0.0:
+                aux_control_loss = self.aux_control_loss(
+                    out["aux"],
+                    aux_target,
+                    lane_gain=self.cfg.aux_control_lane_gain,
+                    heading_gain=self.cfg.aux_control_heading_gain,
+                    steer_limit=self.cfg.aux_control_steer_limit,
+                    sign_weight=self.cfg.aux_control_sign_weight,
+                    active_threshold=self.cfg.aux_control_active_threshold,
+                )
+                pred_aux_control_loss = self.aux_control_loss(
+                    out["pred_aux"],
+                    pred_aux_target,
+                    lane_gain=self.cfg.aux_control_lane_gain,
+                    heading_gain=self.cfg.aux_control_heading_gain,
+                    steer_limit=self.cfg.aux_control_steer_limit,
+                    sign_weight=self.cfg.aux_control_sign_weight,
+                    active_threshold=self.cfg.aux_control_active_threshold,
+                )
+                aux_control_total = aux_control_loss + self.cfg.pred_aux_control_weight * pred_aux_control_loss
 
         action_target_all = batch["action"].float()
         action_target = action_target_all[:, -1] if self.cfg.use_temporal_action_head else action_target_all
@@ -449,6 +528,7 @@ class DrivingLeWM(nn.Module):
             self.cfg.pred_weight * pred_loss
             + self.cfg.sigreg_weight * sigreg
             + self.cfg.aux_weight * aux_total
+            + self.cfg.aux_control_weight * aux_control_total
             + self.cfg.action_weight * action_total
             + self.cfg.action_conflict_weight * action_conflict_total
         )
@@ -460,6 +540,8 @@ class DrivingLeWM(nn.Module):
             "pred_aux_loss": pred_aux_loss.detach(),
             **{f"aux_{name}_loss": value.detach() for name, value in aux_parts.items()},
             **{f"pred_aux_{name}_loss": value.detach() for name, value in pred_aux_parts.items()},
+            "aux_control_loss": aux_control_loss.detach(),
+            "pred_aux_control_loss": pred_aux_control_loss.detach(),
             "action_loss": action_loss.detach(),
             "pred_action_loss": pred_action_loss.detach(),
             "action_throttle_loss": action_parts["throttle"].detach(),
