@@ -42,6 +42,18 @@ def test_aux_target_uses_delta_progress_when_configured():
     assert target[0, :, 1].tolist() == pytest.approx([0.0, 3.0, 5.5])
 
 
+def test_aux_regression_loss_can_weight_lane_feedback_terms():
+    pred = torch.zeros(1, 1, 8)
+    target = torch.zeros(1, 1, 8)
+    target[..., 2] = 0.2
+    target[..., 3] = -0.4
+
+    loss = DrivingLeWM.aux_regression_loss(pred, target, [0.0, 0.0, 4.0, 4.0, 0.0, 0.0, 0.0, 0.0])
+
+    expected = (4.0 * 0.5 * 0.2**2 + 4.0 * 0.5 * 0.4**2) / 8.0
+    assert float(loss) == pytest.approx(expected)
+
+
 def test_progress_signal_rejects_unknown_mode():
     route_progress = torch.zeros(1, 2, 1)
 
@@ -140,6 +152,39 @@ def test_no_aux_config_disables_aux_head_and_aux_losses(monkeypatch):
     assert float(losses["pred_aux_loss"]) == 0.0
     with pytest.raises(RuntimeError, match="use_aux_head=true"):
         model.rollout_aux(batch["pixels"], batch["action"])
+
+
+def test_perceive_aux_reads_current_image_aux(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            values = torch.arange(batch * 8, dtype=pixels.dtype, device=pixels.device).reshape(batch, 2, 4)
+            return SimpleNamespace(last_hidden_state=values)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    cfg = DrivingLeWMConfig(
+        image_size=8,
+        patch_size=4,
+        action_dim=3,
+        embed_dim=4,
+        history_size=2,
+        predictor_depth=1,
+        predictor_heads=1,
+        predictor_mlp_dim=8,
+        use_aux_head=True,
+        aux_weight=1.0,
+        pred_aux_weight=0.0,
+    )
+    model = DrivingLeWM(cfg)
+    pixels = torch.zeros(1, 2, 3, 8, 8)
+
+    aux = model.perceive_aux(pixels)
+
+    assert aux.shape == (1, 8)
 
 
 def test_route_conditioning_is_optional_and_requires_route_ids(monkeypatch):

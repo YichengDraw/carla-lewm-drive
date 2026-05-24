@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
             "model_lane_keep",
             "model_action",
             "model_action_lane_keep",
+            "model_perception_lane_keep",
             "expert",
             "autopilot",
             "constant",
@@ -72,6 +73,8 @@ def normalize_policy(policy: str | None) -> str:
         return "model_action"
     if value in {"model_action_lane_keep", "action_lane_keep"}:
         return "model_action_lane_keep"
+    if value in {"model_perception_lane_keep", "perception_lane_keep"}:
+        return "model_perception_lane_keep"
     if value in {"expert", "autopilot"}:
         return "autopilot"
     if value == "constant":
@@ -86,7 +89,13 @@ def is_model_policy(policy: str) -> bool:
 
 
 def requires_model(policy: str) -> bool:
-    return policy in {"model", "model_lane_keep", "model_action", "model_action_lane_keep"}
+    return policy in {
+        "model",
+        "model_lane_keep",
+        "model_action",
+        "model_action_lane_keep",
+        "model_perception_lane_keep",
+    }
 
 
 def is_action_policy(policy: str) -> bool:
@@ -314,6 +323,11 @@ def load_model(checkpoint_path: Path) -> DrivingLeWM:
         use_aux_head=bool(model_cfg.get("use_aux_head", True)),
         aux_weight=float(model_cfg["aux_weight"]),
         pred_aux_weight=float(model_cfg.get("pred_aux_weight", 1.0)),
+        aux_component_weights=(
+            tuple(float(x) for x in model_cfg["aux_component_weights"])
+            if model_cfg.get("aux_component_weights") is not None
+            else None
+        ),
         action_weight=float(model_cfg.get("action_weight", 0.0)),
         pred_action_weight=float(model_cfg.get("pred_action_weight", 1.0)),
         action_conflict_weight=float(model_cfg.get("action_conflict_weight", 0.0)),
@@ -792,6 +806,22 @@ def run_episode(
                         raw[0] = governed[0]
                         raw[2] = governed[2]
                 block_actions = [raw.astype(np.float32) for raw in block]
+            elif policy == "model_perception_lane_keep":
+                assert model is not None
+                if model.aux_head is None:
+                    raise ValueError("model_perception_lane_keep requires a checkpoint trained with use_aux_head=true")
+                pixels = preprocess_pixels(image_history[-int(model.cfg.history_size) :], int(model.cfg.image_size), device)
+                aux = model.perceive_aux(pixels, route_id=int(spawn_index)).detach().cpu().numpy()[0]
+                aux_lane_offset = float(aux[2])
+                aux_heading_error = float(aux[3])
+                aux_speed = float(aux[0])
+                speed_for_control = (
+                    current_speed
+                    if bool(eval_cfg.get("perception_lane_keep_use_true_speed", True))
+                    else max(0.0, aux_speed)
+                )
+                action = lane_keep_action(aux_lane_offset, aux_heading_error, speed_for_control, eval_cfg)
+                block_actions = [action for _ in range(frameskip)]
             elif policy == "lane_keep":
                 action = lane_keep_action(pre_lane_offset, pre_heading_error, current_speed, eval_cfg)
                 block_actions = [action]

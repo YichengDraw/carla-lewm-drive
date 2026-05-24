@@ -299,6 +299,7 @@ def test_lane_keep_policy_dry_run_does_not_require_checkpoint(tmp_path):
 def test_model_action_policy_normalizes_to_model_backed_action():
     assert normalize_policy("action") == "model_action"
     assert normalize_policy("model_action_lane_keep") == "model_action_lane_keep"
+    assert normalize_policy("perception_lane_keep") == "model_perception_lane_keep"
 
 
 def test_checkpoint_argument_preserves_configured_action_policy():
@@ -342,6 +343,7 @@ def test_load_model_preserves_temporal_action_head_config(tmp_path, monkeypatch)
             "use_aux_head": False,
             "aux_weight": 0.0,
             "pred_aux_weight": 0.0,
+            "aux_component_weights": [1.0, 1.0, 6.0, 6.0, 0.0, 0.0, 0.0, 0.0],
             "action_weight": 1.0,
             "pred_action_weight": 0.0,
             "use_temporal_action_head": True,
@@ -364,6 +366,7 @@ def test_load_model_preserves_temporal_action_head_config(tmp_path, monkeypatch)
             pred_weight=0.0,
             sigreg_weight=0.0,
             aux_weight=0.0,
+            aux_component_weights=(1.0, 1.0, 6.0, 6.0, 0.0, 0.0, 0.0, 0.0),
             action_weight=1.0,
             pred_action_weight=0.0,
             use_temporal_action_head=True,
@@ -378,6 +381,7 @@ def test_load_model_preserves_temporal_action_head_config(tmp_path, monkeypatch)
     loaded = load_model(checkpoint)
 
     assert loaded.cfg.use_temporal_action_head is True
+    assert loaded.cfg.aux_component_weights == pytest.approx((1.0, 1.0, 6.0, 6.0, 0.0, 0.0, 0.0, 0.0))
     assert loaded.cfg.temporal_action_history_noise_std == pytest.approx((0.03, 0.06, 0.02))
     assert loaded.cfg.temporal_action_history_noise_prob == pytest.approx(0.5)
     assert loaded.action_head[0].normalized_shape == (21,)

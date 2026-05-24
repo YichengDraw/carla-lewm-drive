@@ -31,6 +31,7 @@ class DrivingLeWMConfig:
     use_aux_head: bool = True
     aux_weight: float = 0.2
     pred_aux_weight: float = 1.0
+    aux_component_weights: tuple[float, float, float, float, float, float, float, float] | None = None
     action_weight: float = 0.0
     pred_action_weight: float = 1.0
     action_component_weights: tuple[float, float, float] | None = None
@@ -339,6 +340,21 @@ class DrivingLeWM(nn.Module):
             dim=-1,
         ).float()
 
+    @staticmethod
+    def aux_regression_loss(
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        component_weights: tuple[float, float, float, float, float, float, float, float] | list[float] | None,
+    ) -> torch.Tensor:
+        raw = F.smooth_l1_loss(pred.float(), target.float(), reduction="none")
+        if component_weights is None:
+            return raw.mean()
+        if len(component_weights) != pred.shape[-1]:
+            raise ValueError(f"aux_component_weights must contain {pred.shape[-1]} values")
+        weights = pred.new_tensor(component_weights, dtype=raw.dtype)
+        shaped = weights.reshape(*([1] * (raw.ndim - 1)), raw.shape[-1])
+        return (raw * shaped).sum() / shaped.expand_as(raw).sum().clamp_min(1e-8)
+
     def loss(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         out = self.forward(batch)
         pred_loss = F.mse_loss(out["pred_emb"], out["target_emb"])
@@ -351,8 +367,12 @@ class DrivingLeWM(nn.Module):
         if self.aux_head is not None:
             aux_target = self.aux_target(batch, self.cfg.progress_mode)
             pred_aux_target = aux_target[:, 1 : self.cfg.history_size + 1].detach()
-            aux_loss = F.smooth_l1_loss(out["aux"], aux_target)
-            pred_aux_loss = F.smooth_l1_loss(out["pred_aux"], pred_aux_target)
+            aux_loss = self.aux_regression_loss(out["aux"], aux_target, self.cfg.aux_component_weights)
+            pred_aux_loss = self.aux_regression_loss(
+                out["pred_aux"],
+                pred_aux_target,
+                self.cfg.aux_component_weights,
+            )
             aux_total = aux_loss + self.cfg.pred_aux_weight * pred_aux_loss
 
         action_target_all = batch["action"].float()
@@ -437,3 +457,11 @@ class DrivingLeWM(nn.Module):
         if self.cfg.use_temporal_action_head:
             return self.action_predictions(emb, action_history)
         return self.action_head(emb[:, -1])
+
+    @torch.no_grad()
+    def perceive_aux(self, pixels: torch.Tensor, route_id: torch.Tensor | int | None = None) -> torch.Tensor:
+        if self.aux_head is None:
+            raise RuntimeError("perceive_aux requires use_aux_head=true")
+        self.eval()
+        emb = self.apply_route_condition(self.encode_pixels(pixels), route_id)
+        return self.aux_head(emb[:, -1])
