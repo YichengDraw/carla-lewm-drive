@@ -40,6 +40,8 @@ def route_for_episode(eval_cfg: dict[str, Any], episode_idx: int) -> int:
 def convert(eval_dir: Path, eval_cfg: dict[str, Any]) -> dict[str, Any]:
     pixels: list[np.ndarray] = []
     actions: list[np.ndarray] = []
+    state: list[np.ndarray] = []
+    proprio: list[np.ndarray] = []
     speed: list[float] = []
     progress: list[float] = []
     lane: list[float] = []
@@ -71,6 +73,8 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any]) -> dict[str, Any]:
 
             pixels.append(rgb)
             actions.append(teacher.astype(np.float32))
+            state.append(np.asarray([0.0, 0.0, 0.0, speed_mps, float(row["route_progress_m"]), lane_offset], dtype=np.float32))
+            proprio.append(np.asarray([speed_mps, lane_offset, heading_error], dtype=np.float32))
             speed.append(speed_mps)
             progress.append(float(row["route_progress_m"]))
             lane.append(lane_offset)
@@ -93,6 +97,8 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any]) -> dict[str, Any]:
     return {
         "pixels": np.asarray(pixels, dtype=np.uint8),
         "action": np.asarray(actions, dtype=np.float32),
+        "state": np.asarray(state, dtype=np.float32),
+        "proprio": np.asarray(proprio, dtype=np.float32),
         "speed_mps": np.asarray(speed, dtype=np.float32),
         "route_progress_m": np.asarray(progress, dtype=np.float32),
         "lane_offset_m": np.asarray(lane, dtype=np.float32),

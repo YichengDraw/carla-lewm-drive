@@ -33,6 +33,7 @@ def parse_args() -> argparse.Namespace:
             "model_action",
             "model_action_lane_keep",
             "model_perception_lane_keep",
+            "model_rollout_lane_keep",
             "expert",
             "autopilot",
             "constant",
@@ -75,6 +76,8 @@ def normalize_policy(policy: str | None) -> str:
         return "model_action_lane_keep"
     if value in {"model_perception_lane_keep", "perception_lane_keep"}:
         return "model_perception_lane_keep"
+    if value in {"model_rollout_lane_keep", "rollout_lane_keep"}:
+        return "model_rollout_lane_keep"
     if value in {"expert", "autopilot"}:
         return "autopilot"
     if value == "constant":
@@ -95,6 +98,7 @@ def requires_model(policy: str) -> bool:
         "model_action",
         "model_action_lane_keep",
         "model_perception_lane_keep",
+        "model_rollout_lane_keep",
     }
 
 
@@ -819,6 +823,30 @@ def run_episode(
                     raise ValueError("model_perception_lane_keep requires a checkpoint trained with use_aux_head=true")
                 pixels = preprocess_pixels(image_history[-int(model.cfg.history_size) :], int(model.cfg.image_size), device)
                 aux = model.perceive_aux(pixels, route_id=int(spawn_index)).detach().cpu().numpy()[0]
+                aux_lane_offset = float(aux[2])
+                aux_heading_error = float(aux[3])
+                aux_speed = float(aux[0])
+                speed_for_control = (
+                    current_speed
+                    if bool(eval_cfg.get("perception_lane_keep_use_true_speed", True))
+                    else max(0.0, aux_speed)
+                )
+                action = lane_keep_action(aux_lane_offset, aux_heading_error, speed_for_control, eval_cfg)
+                perception_aux = {
+                    "aux_speed_mps": aux_speed,
+                    "aux_lane_offset_m": aux_lane_offset,
+                    "aux_heading_error_rad": aux_heading_error,
+                    "aux_control_steer": float(action[1]),
+                }
+                block_actions = [action for _ in range(frameskip)]
+            elif policy == "model_rollout_lane_keep":
+                assert model is not None
+                if model.aux_head is None:
+                    raise ValueError("model_rollout_lane_keep requires a checkpoint trained with use_aux_head=true")
+                pixels = preprocess_pixels(image_history[-int(model.cfg.history_size) :], int(model.cfg.image_size), device)
+                hist = np.stack(action_history[-int(model.cfg.history_size) :], axis=0)
+                history_actions = torch.from_numpy(hist).unsqueeze(0).float().to(device)
+                aux = model.rollout_aux(pixels, history_actions, route_id=int(spawn_index)).detach().cpu().numpy()[0]
                 aux_lane_offset = float(aux[2])
                 aux_heading_error = float(aux[3])
                 aux_speed = float(aux[0])

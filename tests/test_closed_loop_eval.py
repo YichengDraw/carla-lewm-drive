@@ -15,6 +15,7 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     load_model,
     maybe_govern_model_speed,
     normalize_policy,
+    requires_model,
     resolve_policy,
     run_dry_eval,
     write_action_trace,
@@ -300,6 +301,8 @@ def test_model_action_policy_normalizes_to_model_backed_action():
     assert normalize_policy("action") == "model_action"
     assert normalize_policy("model_action_lane_keep") == "model_action_lane_keep"
     assert normalize_policy("perception_lane_keep") == "model_perception_lane_keep"
+    assert normalize_policy("rollout_lane_keep") == "model_rollout_lane_keep"
+    assert requires_model("model_rollout_lane_keep") is True
 
 
 def test_checkpoint_argument_preserves_configured_action_policy():
