@@ -17,11 +17,12 @@ from carla_lewm_drive.driving_lewm.model import AUX_COMPONENTS, DrivingLeWM
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Measure image-to-aux lane perception quality for driving LeWM checkpoints.")
+    parser = argparse.ArgumentParser(description="Measure aux lane perception quality for driving LeWM checkpoints.")
     parser.add_argument("--train-config", type=Path, default=Path("configs/train_d1_tiny_aux_lane_perception_long_recovery_mixed_8k.yaml"))
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--eval-config", type=Path, default=Path("configs/eval_d1_city_free_drive_model_perception_lane_keep_long_recovery_mixed_1km_simple.yaml"))
     parser.add_argument("--split", choices=("train", "val", "test", "all"), default="val")
+    parser.add_argument("--mode", choices=("perceive", "rollout"), default="perceive")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--max-batches", type=int, default=32)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/analysis/aux_perception"))
@@ -112,8 +113,17 @@ def summarize(args: argparse.Namespace) -> dict[str, Any]:
         route_id = batch.get("route_id")
         if route_id is not None:
             route_id = route_id.to(device)
-        pred = model.perceive_aux(pixels, route_id=route_id).detach().cpu()
-        target = DrivingLeWM.aux_target(batch, model.cfg.progress_mode)[:, -1].detach().cpu()
+        aux_target = DrivingLeWM.aux_target(batch, model.cfg.progress_mode)
+        if args.mode == "rollout":
+            history_size = int(model.cfg.history_size)
+            pred_pixels = pixels[:, :history_size]
+            pred_actions = batch["action"][:, :history_size].to(device)
+            pred_route_id = route_id[:, :history_size] if route_id is not None and route_id.ndim >= 2 else route_id
+            pred = model.rollout_aux(pred_pixels, pred_actions, route_id=pred_route_id).detach().cpu()
+            target = aux_target[:, history_size].detach().cpu()
+        else:
+            pred = model.perceive_aux(pixels, route_id=route_id).detach().cpu()
+            target = aux_target[:, -1].detach().cpu()
         preds.append(pred.numpy())
         targets.append(target.numpy())
 
@@ -142,6 +152,7 @@ def summarize(args: argparse.Namespace) -> dict[str, Any]:
         "train_config": str(args.train_config),
         "eval_config": str(args.eval_config) if args.eval_config else None,
         "split": args.split,
+        "mode": args.mode,
         "samples": int(pred_all.shape[0]),
         "device": str(device),
         "per_component": per_component,
@@ -158,6 +169,7 @@ def write_markdown(result: dict[str, Any], path: Path) -> None:
         "",
         "## Verdict Inputs",
         "",
+        f"- Mode: `{result['mode']}`.",
         f"- Samples: `{result['samples']}` from `{result['split']}`.",
         f"- Lane offset MAE/RMSE: `{lane['mae']:.5f}` / `{lane['rmse']:.5f}` m; corr `{lane['corr']}`.",
         f"- Heading error MAE/RMSE: `{heading['mae']:.5f}` / `{heading['rmse']:.5f}` rad; corr `{heading['corr']}`.",
