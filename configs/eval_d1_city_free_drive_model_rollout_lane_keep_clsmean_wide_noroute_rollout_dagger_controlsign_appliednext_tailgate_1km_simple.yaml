@@ -29,6 +29,7 @@ eval:
   speed_limit_as_infraction: false
   stop_on_collision: true
   stop_on_offroad: true
+  stop_on_lane_invasion: true
   stop_on_red_light: true
   stop_on_blocked: true
   stop_on_speed_limit: false

@@ -9,6 +9,7 @@ class DrivingEpisodeMetrics:
     route_progress_m: float
     collision_count: int = 0
     offroad_count: int = 0
+    lane_invasion_count: int = 0
     red_light_count: int = 0
     blocked_count: int = 0
     speed_limit_count: int = 0
@@ -30,6 +31,7 @@ class DrivingEpisodeMetrics:
         penalty = 1.0
         penalty *= 0.50 ** self.collision_count
         penalty *= 0.70 ** self.offroad_count
+        penalty *= 0.75 ** self.lane_invasion_count
         penalty *= 0.70 ** self.red_light_count
         penalty *= 0.80 ** self.blocked_count
         penalty *= 0.85 ** self.speed_limit_count
@@ -44,6 +46,7 @@ class DrivingEpisodeMetrics:
         return (
             self.collision_count
             + self.offroad_count
+            + self.lane_invasion_count
             + self.red_light_count
             + self.blocked_count
             + self.speed_limit_count
@@ -51,11 +54,17 @@ class DrivingEpisodeMetrics:
 
     @property
     def primary_safety_failed(self) -> bool:
-        return (self.collision_count + self.offroad_count + self.blocked_count) > 0
+        return (self.collision_count + self.offroad_count + self.lane_invasion_count + self.blocked_count) > 0
 
     @property
     def primary_or_red_failed(self) -> bool:
-        return (self.collision_count + self.offroad_count + self.red_light_count + self.blocked_count) > 0
+        return (
+            self.collision_count
+            + self.offroad_count
+            + self.lane_invasion_count
+            + self.red_light_count
+            + self.blocked_count
+        ) > 0
 
 
 def aggregate_metrics(rows: list[DrivingEpisodeMetrics]) -> dict[str, float]:
@@ -72,6 +81,7 @@ def aggregate_metrics(rows: list[DrivingEpisodeMetrics]) -> dict[str, float]:
         "success_rate_no_primary_or_red_infraction": sum(0 if r.primary_or_red_failed else 1 for r in rows) / n,
         "collision_count": sum(r.collision_count for r in rows),
         "offroad_count": sum(r.offroad_count for r in rows),
+        "lane_invasion_count": sum(r.lane_invasion_count for r in rows),
         "red_light_count": sum(r.red_light_count for r in rows),
         "blocked_count": sum(r.blocked_count for r in rows),
         "speed_limit_count": sum(r.speed_limit_count for r in rows),

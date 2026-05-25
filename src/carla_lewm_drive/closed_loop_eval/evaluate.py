@@ -281,10 +281,12 @@ class EpisodeAccumulator:
     first_infraction_distance_m: float | None = None
     collision_count: int = 0
     offroad_count: int = 0
+    lane_invasion_count: int = 0
     red_light_count: int = 0
     blocked_count: int = 0
     speed_limit_count: int = 0
     offroad_active: bool = False
+    lane_invasion_active: bool = False
     red_light_active: bool = False
     blocked_active: bool = False
     speed_limit_active: bool = False
@@ -297,6 +299,14 @@ class EpisodeAccumulator:
         if count <= 0:
             return
         self.collision_count += int(count)
+        self._mark_first_infraction()
+
+    def add_lane_invasion_events(self, count: int) -> None:
+        if count <= 0:
+            self.lane_invasion_active = False
+            return
+        self.lane_invasion_active = True
+        self.lane_invasion_count += int(count)
         self._mark_first_infraction()
 
     def update_flag(self, name: str, active: bool, *, count_as_first_infraction: bool = True) -> None:
@@ -313,6 +323,7 @@ class EpisodeAccumulator:
             route_progress_m=min(self.route_progress_m, self.route_length_m),
             collision_count=self.collision_count,
             offroad_count=self.offroad_count,
+            lane_invasion_count=self.lane_invasion_count,
             red_light_count=self.red_light_count,
             blocked_count=self.blocked_count,
             speed_limit_count=self.speed_limit_count,
@@ -433,6 +444,7 @@ def write_metrics(output_dir: Path, rows: list[DrivingEpisodeMetrics]) -> dict[s
                 "mini_driving_score",
                 "collision_count",
                 "offroad_count",
+                "lane_invasion_count",
                 "red_light_count",
                 "blocked_count",
                 "speed_limit_count",
@@ -450,6 +462,7 @@ def write_metrics(output_dir: Path, rows: list[DrivingEpisodeMetrics]) -> dict[s
                     "mini_driving_score": row.mini_driving_score,
                     "collision_count": row.collision_count,
                     "offroad_count": row.offroad_count,
+                    "lane_invasion_count": row.lane_invasion_count,
                     "red_light_count": row.red_light_count,
                     "blocked_count": row.blocked_count,
                     "speed_limit_count": row.speed_limit_count,
@@ -485,6 +498,7 @@ def write_action_trace(output_dir: Path, episode_idx: int, rows: list[dict[str, 
         "aux_heading_error_rad",
         "aux_control_steer",
         "offroad",
+        "lane_invasion",
         "red_light",
         "speed_limit_violation",
         "blocked",
@@ -515,6 +529,11 @@ def make_camera(carla, world, ego, cfg: dict[str, Any]):
 
 def make_collision_sensor(carla, world, ego):
     bp = world.get_blueprint_library().find("sensor.other.collision")
+    return world.spawn_actor(bp, carla.Transform(), attach_to=ego)
+
+
+def make_lane_invasion_sensor(carla, world, ego):
+    bp = world.get_blueprint_library().find("sensor.other.lane_invasion")
     return world.spawn_actor(bp, carla.Transform(), attach_to=ego)
 
 
@@ -756,7 +775,9 @@ def run_episode(
     frames: list[tuple[np.ndarray, str]] = []
     action_trace: list[dict[str, float | int]] = []
     collision_events = {"count": 0}
+    lane_invasion_events = {"count": 0}
     last_collision_count = 0
+    last_lane_invasion_count = 0
     blocked_seconds = 0.0
     speed_limit_seconds = 0.0
     step = 0
@@ -770,6 +791,14 @@ def run_episode(
     collision_sensor = make_collision_sensor(carla, world, ego)
     actors.append(collision_sensor)
     collision_sensor.listen(lambda _event: collision_events.__setitem__("count", collision_events["count"] + 1))
+    lane_invasion_sensor = make_lane_invasion_sensor(carla, world, ego)
+    actors.append(lane_invasion_sensor)
+    lane_invasion_sensor.listen(
+        lambda event: lane_invasion_events.__setitem__(
+            "count",
+            lane_invasion_events["count"] + max(1, len(getattr(event, "crossed_lane_markings", []) or [])),
+        )
+    )
     image_queue = listen_queue(camera)
 
     try:
@@ -928,6 +957,10 @@ def run_episode(
                 current_collision_count = int(collision_events["count"])
                 acc.add_collision_events(current_collision_count - last_collision_count)
                 last_collision_count = current_collision_count
+                current_lane_invasion_count = int(lane_invasion_events["count"])
+                lane_invasion_delta = current_lane_invasion_count - last_lane_invasion_count
+                acc.add_lane_invasion_events(lane_invasion_delta)
+                last_lane_invasion_count = current_lane_invasion_count
 
                 if step * fixed_delta >= float(eval_cfg.get("blocked_grace_seconds", 5.0)) and speed < float(
                     eval_cfg.get("blocked_speed_mps", 0.1)
@@ -977,6 +1010,7 @@ def run_episode(
                         "lane_offset_m": float(lane_offset),
                         "heading_error_rad": float(heading_error),
                         "offroad": int(bool(offroad)),
+                        "lane_invasion": int(acc.lane_invasion_active),
                         "red_light": int(bool(red_light)),
                         "speed_limit_violation": int(bool(speed_limit_violation)),
                         "blocked": int(bool(blocked)),
@@ -992,6 +1026,8 @@ def run_episode(
                 if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
                     break
                 if bool(eval_cfg.get("stop_on_offroad", False)) and acc.offroad_count > 0:
+                    break
+                if bool(eval_cfg.get("stop_on_lane_invasion", False)) and acc.lane_invasion_count > 0:
                     break
                 if bool(eval_cfg.get("stop_on_red_light", False)) and acc.red_light_count > 0:
                     break
@@ -1012,6 +1048,8 @@ def run_episode(
             if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
                 break
             if bool(eval_cfg.get("stop_on_offroad", False)) and acc.offroad_count > 0:
+                break
+            if bool(eval_cfg.get("stop_on_lane_invasion", False)) and acc.lane_invasion_count > 0:
                 break
             if bool(eval_cfg.get("stop_on_red_light", False)) and acc.red_light_count > 0:
                 break

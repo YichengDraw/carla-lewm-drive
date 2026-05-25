@@ -225,6 +225,7 @@ def test_write_metrics_outputs_episode_csv_and_summary(tmp_path):
         route_length_m=100.0,
         route_progress_m=80.0,
         collision_count=1,
+        lane_invasion_count=2,
         first_infraction_distance_m=30.0,
     )
 
@@ -236,6 +237,7 @@ def test_write_metrics_outputs_episode_csv_and_summary(tmp_path):
     assert rows[0]["route_completion_pct"] == "80.0"
     assert rows[0]["infraction_free_distance_m"] == "30.0"
     assert rows[0]["collision_count"] == "1"
+    assert rows[0]["lane_invasion_count"] == "2"
 
 
 def test_write_action_trace_outputs_stepwise_control_csv(tmp_path):
@@ -253,6 +255,7 @@ def test_write_action_trace_outputs_stepwise_control_csv(tmp_path):
                 "lane_offset_m": 0.12,
                 "heading_error_rad": -0.03,
                 "offroad": 0,
+                "lane_invasion": 1,
                 "speed_limit_violation": 0,
                 "blocked": 0,
                 "collision_count": 0,
@@ -267,6 +270,7 @@ def test_write_action_trace_outputs_stepwise_control_csv(tmp_path):
     assert rows[0]["steer"] == "-0.01"
     assert rows[0]["lane_offset_m"] == "0.12"
     assert rows[0]["heading_error_rad"] == "-0.03"
+    assert rows[0]["lane_invasion"] == "1"
     assert rows[0]["speed_limit_violation"] == "0"
 
 
