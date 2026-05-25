@@ -278,6 +278,7 @@ def train(cfg: dict[str, Any], *, no_wandb: bool = False) -> Path:
     early_stop_min_delta = float(cfg["trainer"].get("early_stop_min_delta", 0.0))
     log_every = int(cfg["trainer"].get("log_every_steps", 50))
     eval_every = max(1, int(cfg["trainer"].get("eval_every_epochs", 1)))
+    save_eval_checkpoints = bool(cfg["trainer"].get("save_eval_checkpoints", False))
     limit_train = cfg.get("limit_train_batches") or cfg["trainer"].get("limit_train_batches")
     limit_val = cfg.get("limit_val_batches") or cfg["trainer"].get("limit_val_batches")
     global_step = 0
@@ -336,18 +337,30 @@ def train(cfg: dict[str, Any], *, no_wandb: bool = False) -> Path:
             append_metrics(metrics_csv, val_row)
             if wandb_run is not None:
                 wandb_run.log(val_row, step=global_step)
+            checkpoint_payload = {
+                "model": model.state_dict(),
+                "cfg": cfg,
+                "val": {f"val/{k}": v for k, v in val_losses.items()},
+                "epoch": epoch,
+                "global_step": global_step,
+            }
+            if save_eval_checkpoints:
+                torch.save(
+                    {
+                        **checkpoint_payload,
+                        "checkpoint_reason": "eval",
+                    },
+                    output_dir / f"epoch{epoch:03d}_step{global_step:06d}.pt",
+                )
             improved = val_losses["loss"] < best_val - early_stop_min_delta
             if improved:
                 best_val = val_losses["loss"]
                 bad_eval_count = 0
                 torch.save(
                     {
-                        "model": model.state_dict(),
-                        "cfg": cfg,
+                        **checkpoint_payload,
                         "best_val": best_val,
                         "best": {"val/loss": best_val, "epoch": epoch, "step": global_step},
-                        "epoch": epoch,
-                        "global_step": global_step,
                     },
                     best_path,
                 )
