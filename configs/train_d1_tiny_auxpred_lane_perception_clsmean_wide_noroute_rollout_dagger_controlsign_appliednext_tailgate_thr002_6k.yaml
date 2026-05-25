@@ -1,0 +1,84 @@
+run:
+  name: d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_thr002_6k
+  seed: 5135
+  output_dir: outputs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_thr002_6k
+
+data:
+  dataset_paths:
+    - data/d1_city_free_drive/carla_d1_city_free_drive_fast.h5
+    - data/d1_city_free_drive_recovery_active/carla_d1_city_free_drive_recovery_active_fast.h5
+    - data/d1_city_free_drive_long_recovery/carla_d1_city_free_drive_long_recovery_fast.h5
+    - data/d1_city_free_drive_wide_recovery/carla_d1_city_free_drive_wide_recovery_fast.h5
+    - data/d1_city_free_drive_dagger/carla_d1_city_free_drive_dagger_rollout_step1743_fast.h5
+    - data/d1_city_free_drive_dagger/carla_d1_city_free_drive_clsmean_fail_step1818_100m_appliednext_fast.h5
+  dataset_repeat_factors: [1, 1, 1, 4, 8, 220]
+  frameskip: 5
+  history_size: 3
+  num_preds: 1
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  split_seed: 20260535
+  image_size: 224
+
+model:
+  encoder_scale: tiny
+  encoder_pooling: cls_mean
+  patch_size: 14
+  embed_dim: 192
+  predictor_depth: 6
+  predictor_heads: 6
+  predictor_mlp_dim: 768
+  dropout: 0.1
+  pred_weight: 0.0
+  sigreg_weight: 0.0
+  use_aux_head: true
+  aux_weight: 1.0
+  pred_aux_weight: 1.0
+  aux_component_weights: [0.05, 0.0, 48.0, 48.0, 0.0, 0.0, 0.0, 0.0]
+  aux_control_weight: 1.0
+  pred_aux_control_weight: 8.0
+  aux_control_sign_weight: 6.0
+  aux_control_active_threshold: 0.02
+  aux_control_lane_gain: 0.35
+  aux_control_heading_gain: 1.2
+  aux_control_steer_limit: 0.35
+  action_weight: 0.0
+  pred_action_weight: 0.0
+  action_component_weights: [2.0, 16.0, 0.4]
+  action_active_steer_weight: 8.0
+  action_active_steer_threshold: 0.005
+  action_conflict_weight: 0.0
+  pred_action_conflict_weight: 0.0
+  progress_mode: delta
+  route_vocab_size: 0
+  route_embed_scale: 0.0
+  use_temporal_action_head: false
+  temporal_action_include_history_actions: true
+
+optimizer:
+  lr: 3.0e-5
+  weight_decay: 1.0e-3
+
+trainer:
+  max_epochs: 40
+  max_steps: 6000
+  batch_size: 256
+  num_workers: 4
+  precision: bf16
+  gradient_clip_norm: 1.0
+  log_every_steps: 50
+  eval_every_epochs: 1
+  save_eval_checkpoints: true
+  early_stop_patience_evals: 6
+  early_stop_min_steps: 1600
+  early_stop_min_delta: 0.0
+  batch_probe_order: [256, 192, 128, 96, 64]
+
+wandb:
+  enabled: true
+  entity: yicheng132024-southern-university-of-science-technology
+  project: carla-lewm-drive
+  group: d1-auxpred-lane-perception-clsmean-controlsign-appliednext-tailgate-thr002-dagger
+  resume: never
+  mode: online
