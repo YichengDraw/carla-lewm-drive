@@ -75,6 +75,25 @@ def test_aux_control_loss_penalizes_wrong_steering_direction():
     assert float(wrong_loss) > float(same_loss)
 
 
+def test_aux_control_loss_can_balance_steering_sign_groups():
+    target = torch.zeros(1, 4, 8)
+    pred = torch.zeros(1, 4, 8)
+    target[..., 2] = torch.tensor([-1.0, 1.0, 1.0, 1.0])
+    pred[..., 2] = torch.tensor([1.0, 1.0, 1.0, 1.0])
+
+    kwargs = dict(
+        lane_gain=1.0,
+        heading_gain=0.0,
+        steer_limit=2.0,
+        sign_weight=1.0,
+        active_threshold=0.05,
+    )
+    unbalanced = DrivingLeWM.aux_control_loss(pred, target, balance_signs=False, **kwargs)
+    balanced = DrivingLeWM.aux_control_loss(pred, target, balance_signs=True, **kwargs)
+
+    assert float(balanced) > float(unbalanced)
+
+
 def test_progress_signal_rejects_unknown_mode():
     route_progress = torch.zeros(1, 2, 1)
 

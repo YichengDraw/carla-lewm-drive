@@ -48,6 +48,7 @@ class DrivingLeWMConfig:
     pred_aux_control_weight: float = 1.0
     aux_control_sign_weight: float = 0.0
     aux_control_active_threshold: float = 0.02
+    aux_control_sign_balance: bool = False
     aux_control_lane_gain: float = 0.35
     aux_control_heading_gain: float = 1.2
     aux_control_steer_limit: float = 0.35
@@ -425,6 +426,7 @@ class DrivingLeWM(nn.Module):
         steer_limit: float,
         sign_weight: float,
         active_threshold: float,
+        balance_signs: bool = False,
     ) -> torch.Tensor:
         pred_steer = cls.aux_control_steer(
             pred,
@@ -445,7 +447,16 @@ class DrivingLeWM(nn.Module):
             if bool(active.any()):
                 direction = torch.sign(target_steer[active])
                 signed_pred = pred_steer[active] * direction
-                sign_penalty = F.relu(threshold - signed_pred).mean()
+                raw_penalty = F.relu(threshold - signed_pred)
+                if balance_signs:
+                    group_penalties = []
+                    for sign in (-1.0, 1.0):
+                        group = direction == sign
+                        if bool(group.any()):
+                            group_penalties.append(raw_penalty[group].mean())
+                    sign_penalty = torch.stack(group_penalties).mean()
+                else:
+                    sign_penalty = raw_penalty.mean()
                 loss = loss + float(sign_weight) * sign_penalty
         return loss
 
@@ -484,6 +495,7 @@ class DrivingLeWM(nn.Module):
                     steer_limit=self.cfg.aux_control_steer_limit,
                     sign_weight=self.cfg.aux_control_sign_weight,
                     active_threshold=self.cfg.aux_control_active_threshold,
+                    balance_signs=self.cfg.aux_control_sign_balance,
                 )
                 pred_aux_control_loss = self.aux_control_loss(
                     out["pred_aux"],
@@ -493,6 +505,7 @@ class DrivingLeWM(nn.Module):
                     steer_limit=self.cfg.aux_control_steer_limit,
                     sign_weight=self.cfg.aux_control_sign_weight,
                     active_threshold=self.cfg.aux_control_active_threshold,
+                    balance_signs=self.cfg.aux_control_sign_balance,
                 )
                 aux_control_total = aux_control_loss + self.cfg.pred_aux_control_weight * pred_aux_control_loss
 
