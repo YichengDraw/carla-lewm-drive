@@ -224,6 +224,8 @@ def test_write_metrics_outputs_episode_csv_and_summary(tmp_path):
     row = DrivingEpisodeMetrics(
         route_length_m=100.0,
         route_progress_m=80.0,
+        spawn_index=6,
+        termination_reason="collision",
         collision_count=1,
         lane_invasion_count=2,
         first_infraction_distance_m=30.0,
@@ -236,6 +238,8 @@ def test_write_metrics_outputs_episode_csv_and_summary(tmp_path):
         rows = list(csv.DictReader(f))
     assert rows[0]["route_completion_pct"] == "80.0"
     assert rows[0]["infraction_free_distance_m"] == "30.0"
+    assert rows[0]["spawn_index"] == "6"
+    assert rows[0]["termination_reason"] == "collision"
     assert rows[0]["collision_count"] == "1"
     assert rows[0]["lane_invasion_count"] == "2"
 

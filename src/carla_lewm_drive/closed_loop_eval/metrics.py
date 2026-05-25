@@ -7,6 +7,8 @@ from dataclasses import dataclass
 class DrivingEpisodeMetrics:
     route_length_m: float
     route_progress_m: float
+    spawn_index: int | None = None
+    termination_reason: str = "unknown"
     collision_count: int = 0
     offroad_count: int = 0
     lane_invasion_count: int = 0

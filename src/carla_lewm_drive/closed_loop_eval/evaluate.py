@@ -277,6 +277,8 @@ class CEMPlanner:
 @dataclass
 class EpisodeAccumulator:
     route_length_m: float
+    spawn_index: int | None = None
+    termination_reason: str = "unknown"
     route_progress_m: float = 0.0
     first_infraction_distance_m: float | None = None
     collision_count: int = 0
@@ -321,6 +323,8 @@ class EpisodeAccumulator:
         return DrivingEpisodeMetrics(
             route_length_m=self.route_length_m,
             route_progress_m=min(self.route_progress_m, self.route_length_m),
+            spawn_index=self.spawn_index,
+            termination_reason=self.termination_reason,
             collision_count=self.collision_count,
             offroad_count=self.offroad_count,
             lane_invasion_count=self.lane_invasion_count,
@@ -437,6 +441,8 @@ def write_metrics(output_dir: Path, rows: list[DrivingEpisodeMetrics]) -> dict[s
             f,
             fieldnames=[
                 "episode",
+                "spawn_index",
+                "termination_reason",
                 "route_length_m",
                 "route_progress_m",
                 "route_completion_pct",
@@ -455,6 +461,8 @@ def write_metrics(output_dir: Path, rows: list[DrivingEpisodeMetrics]) -> dict[s
             writer.writerow(
                 {
                     "episode": episode,
+                    "spawn_index": row.spawn_index,
+                    "termination_reason": row.termination_reason,
                     "route_length_m": row.route_length_m,
                     "route_progress_m": row.route_progress_m,
                     "route_completion_pct": row.route_completion_pct,
@@ -770,7 +778,7 @@ def run_episode(
     fixed_delta = float(eval_cfg["fixed_delta_seconds"])
     max_steps = int(round(float(eval_cfg["max_episode_seconds"]) / fixed_delta))
     route_length_m = float(eval_cfg["route_cap_m"])
-    acc = EpisodeAccumulator(route_length_m=route_length_m)
+    acc = EpisodeAccumulator(route_length_m=route_length_m, spawn_index=int(spawn_index))
     actors = []
     frames: list[tuple[np.ndarray, str]] = []
     action_trace: list[dict[str, float | int]] = []
@@ -1024,18 +1032,25 @@ def run_episode(
                 maybe_store_frame(output_dir, frames, rgb, episode=episode_idx, step=step, eval_cfg=eval_cfg)
 
                 if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
+                    acc.termination_reason = "collision"
                     break
                 if bool(eval_cfg.get("stop_on_offroad", False)) and acc.offroad_count > 0:
+                    acc.termination_reason = "offroad"
                     break
                 if bool(eval_cfg.get("stop_on_lane_invasion", False)) and acc.lane_invasion_count > 0:
+                    acc.termination_reason = "lane_invasion"
                     break
                 if bool(eval_cfg.get("stop_on_red_light", False)) and acc.red_light_count > 0:
+                    acc.termination_reason = "red_light"
                     break
                 if bool(eval_cfg.get("stop_on_blocked", True)) and blocked:
+                    acc.termination_reason = "blocked"
                     break
                 if bool(eval_cfg.get("stop_on_speed_limit", False)) and acc.speed_limit_count > 0:
+                    acc.termination_reason = "speed_limit"
                     break
                 if step >= max_steps or acc.route_progress_m >= route_length_m:
+                    acc.termination_reason = "route_complete" if acc.route_progress_m >= route_length_m else "max_steps"
                     break
 
             if requires_model(policy) and latest_rgb is not None and block_raw_actions:
@@ -1046,16 +1061,22 @@ def run_episode(
                 action_history.append(block[:frameskip].reshape(-1).astype(np.float32))
 
             if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
+                acc.termination_reason = "collision"
                 break
             if bool(eval_cfg.get("stop_on_offroad", False)) and acc.offroad_count > 0:
+                acc.termination_reason = "offroad"
                 break
             if bool(eval_cfg.get("stop_on_lane_invasion", False)) and acc.lane_invasion_count > 0:
+                acc.termination_reason = "lane_invasion"
                 break
             if bool(eval_cfg.get("stop_on_red_light", False)) and acc.red_light_count > 0:
+                acc.termination_reason = "red_light"
                 break
             if bool(eval_cfg.get("stop_on_blocked", True)) and acc.blocked_count > 0:
+                acc.termination_reason = "blocked"
                 break
             if bool(eval_cfg.get("stop_on_speed_limit", False)) and acc.speed_limit_count > 0:
+                acc.termination_reason = "speed_limit"
                 break
     finally:
         for actor in reversed(actors):
@@ -1070,6 +1091,8 @@ def run_episode(
 
     if bool(eval_cfg.get("save_action_trace", True)):
         write_action_trace(output_dir, episode_idx, action_trace)
+    if acc.termination_reason == "unknown":
+        acc.termination_reason = "route_complete" if acc.route_progress_m >= route_length_m else "max_steps"
     return acc.to_metrics(), frames
 
 
