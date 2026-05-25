@@ -71,7 +71,7 @@
 <body>
   <header>
     <h1>CARLA-LeWM 1km 城市驾驶计划</h1>
-    <p>读法：先看当前结论和 Go / No-Go，再看每个阶段的证据。当前硬停止条件是 learned model 在简化城市街道无离路、无碰撞、无阻塞、无红灯违规地行驶至少 1km。</p>
+    <p>读法：先看当前结论和 Go / No-Go，再看每个阶段的证据。当前硬停止条件是 learned model 在简化城市街道无压线、无离路、无碰撞、无阻塞、无红灯违规地行驶至少 1km。</p>
   </header>
   <div class="toolbar">
     <input id="search" placeholder="搜索 cls_mean / controlsign / DAgger / W&B / 1km">
@@ -100,14 +100,14 @@
         <h2>当前结论</h2>
         <div class="metrics">
           <div class="metric"><span>硬目标</span><strong>1km</strong><span>无离路、碰撞、阻塞、红灯违规</span></div>
-          <div class="metric"><span>当前主线</span><strong>running</strong><span><code>cls_mean + controlsign + DAgger</code></span></div>
+          <div class="metric"><span>当前主线</span><strong>running</strong><span><code>appliednext tailgate</code>：对齐模型实际闭环动作的失败帧训练</span></div>
           <div class="metric"><span>上一 gate</span><strong>11.73m</strong><span>100m gate，5/5 offroad</span></div>
           <div class="metric"><span>根因</span><strong>wrong sign</strong><span>真实偏移 +1.8m，预测仍为负</span></div>
-          <div class="metric"><span>新数据</span><strong>334</strong><span>失败帧 DAgger，23.7% 超过 1m 偏移</span></div>
+          <div class="metric"><span>新数据</span><strong>329</strong><span>aligned applied-action DAgger；22.5% 超过 1m 偏移</span></div>
           <div class="metric"><span>Batch</span><strong>256</strong><span>RTX 5090 峰值 24.39GB</span></div>
         </div>
         <div class="callout">
-          当前判断：这还不是天气鲁棒性或 ViT 容量问题。闭环失败发生在 10-20m，且 trace 明确显示模型把大正 lane offset 预测成负数，从而持续往错误方向打方向。下一次有效尝试是让 loss 直接惩罚由 lane/heading 推出的 steering 符号错误，并把当前失败帧加入训练分布。
+          当前判断：这还不是天气鲁棒性或 ViT 容量问题。闭环失败发生在 10-20m，且 trace 明确显示模型把大正 lane offset 预测成负数，从而持续往错误方向打方向。最新 epoch001 tailgate checkpoint 已经学到大多时候往纠偏方向打，但 lane 数值仍接近常数，尚未进入 CARLA 100m gate。
         </div>
       </section>
 
@@ -115,7 +115,7 @@
         <h2>任务定义</h2>
         <table>
           <tr><th>阶段</th><th>场景</th><th>通过条件</th></tr>
-          <tr><td><code>D1-simple-1km</code></td><td>Town03，ClearNoon，无车无人，强制绿灯，路线 3/4/6/10/12。</td><td>5/5 episode 跑满 1000m；无 offroad、collision、blocked、red-light。</td></tr>
+          <tr><td><code>D1-simple-1km</code></td><td>Town03，ClearNoon，无车无人，强制绿灯，路线 3/4/6/10/12。</td><td>5/5 episode 跑满 1000m；无 lane invasion、offroad、collision、blocked、red-light。</td></tr>
           <tr><td><code>D1-B lights</code></td><td>同 D1-simple-1km，但不强制绿灯。</td><td>在 1km 安全通过基础上，再要求红灯不违规。</td></tr>
           <tr><td><code>D1-W weather</code></td><td>ClearNoon / CloudyNoon / WetNoon / SoftRainNoon 混训。</td><td>只有单天气 1km 过关后才进入；逐天气报告 Safety IFD。</td></tr>
           <tr><td><code>D2 traffic</code></td><td>稀疏车辆，固定 traffic seed。</td><td>安全跟车/避让；当前暂停。</td></tr>
@@ -130,7 +130,7 @@
           <tr><td><code>cls_mean rollout aux</code> 离线诊断</td><td>lane MAE 0.024m，corr 0.915；control sign acc 0.858。</td><td>常规验证集看起来可用，但没有正向大偏移尾部样本。</td></tr>
           <tr><td>修正 runtime <code>lane_keep</code> 后 100m gate</td><td>mean IFD 11.73m，5/5 offroad，无碰撞/红灯/阻塞。</td><td>真实闭环暴露大正偏移下的符号错误。</td></tr>
           <tr><td>trace 尾部</td><td>真实 lane offset 到 +1.7m/+1.8m，预测 <code>aux_lane_offset_m</code> 仍为负。</td><td>控制器按预测量继续给正 steering，车辆越偏越远。</td></tr>
-          <tr><td>失败帧 DAgger</td><td>334 帧；<code>|lane_offset| &gt; 0.5m</code> 占 41.9%；<code>|lane_offset| &gt; 1m</code> 占 23.7%。</td><td>新数据覆盖原验证集中缺失的闭环尾部。</td></tr>
+          <tr><td>aligned applied-action DAgger</td><td>329 帧；<code>|lane_offset| &gt; 0.5m</code> 占 41.0%；<code>|lane_offset| &gt; 1m</code> 占 22.5%。</td><td>动作标签来自下一 trace row 的模型实际 applied action，和状态转移对齐。</td></tr>
           <tr><td>代码修正</td><td><code>8239efe</code> 合并顶层 <code>lane_keep</code> 到运行时 eval config。</td><td>评估、诊断、DAgger teacher action 现在使用同一套控制参数。</td></tr>
         </table>
       </section>
@@ -140,9 +140,9 @@
         <table>
           <tr><th>Run</th><th>用途</th><th>状态</th></tr>
           <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_contr-20260524-141716-74c008af"><code>d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k</code></a></td>
-            <td><code>cls_mean</code> 表示 ViT CLS token 与 patch mean 拼接；<code>controlsign</code> 表示额外惩罚预测 lane/heading 导出的 steering 方向错误；<code>dagger</code> 表示加入闭环失败帧。</td>
-            <td><span class="tag warn">running</span> epoch 1 已开始，batch 256，W&B 在线，local CSV 同步写入。</td>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_contr-20260525-111653-42200fc9"><code>d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_6k</code></a></td>
+            <td><code>appliednext</code> 表示 DAgger 动作按下一行 applied action 对齐；<code>tailgate</code> 表示失败帧高 repeat，并保存每个 validation checkpoint 供尾部筛选。</td>
+            <td><span class="tag warn">running</span> epoch001 已出 checkpoint；tail sign 高但 lane corr 仍为负，继续等后续 epoch。</td>
           </tr>
           <tr>
             <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_8k-20260524-130854-9040b83a"><code>d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_8k</code></a></td>
@@ -177,16 +177,16 @@
         <h2>关键命令</h2>
         <h3>当前训练</h3>
         <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
-  --config configs/train_d1_tiny_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k.yaml</code></pre>
+  --config configs/train_d1_tiny_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_6k.yaml</code></pre>
         <h3>离线 tail diagnostic</h3>
-        <pre><code>PYTHONPATH=src .venv/bin/python scripts/analyze_aux_perception.py \
-  --train-config configs/train_d1_tiny_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k.yaml \
-  --checkpoint outputs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k/best.pt \
-  --eval-config configs/eval_d1_city_free_drive_model_rollout_lane_keep_clsmean_wide_noroute_rollout_dagger_controlsign_1km_simple.yaml \
-  --mode rollout --split val --batch-size 128 --max-batches 32</code></pre>
+        <pre><code>PYTHONPATH=src .venv/bin/python scripts/rank_aux_tail_checkpoints.py \
+  --train-config /tmp/analyze_appliednext_fail_only.yaml \
+  --eval-config configs/eval_d1_city_free_drive_model_rollout_lane_keep_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_1km_simple.yaml \
+  --checkpoint-glob "outputs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_6k/epoch*.pt" \
+  --mode rollout --split all --batch-size 64 --max-batches 16</code></pre>
         <h3>100m gate</h3>
         <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d1_city_free_drive_model_rollout_lane_keep_clsmean_wide_noroute_rollout_dagger_controlsign_1km_simple.yaml \
+  --config configs/eval_d1_city_free_drive_model_rollout_lane_keep_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_1km_simple.yaml \
   --route-cap-m 100</code></pre>
       </section>
 
@@ -194,7 +194,7 @@
         <h2>Go / No-Go</h2>
         <table>
           <tr><th>Gate</th><th>Go</th><th>No-Go 动作</th></tr>
-          <tr><td>离线 tail</td><td>正/负大偏移都有样本；control sign acc ≥ 0.90；lane corr ≥ 0.75。</td><td>补采对应方向失败帧，或提高 control-sign / tail repeat 权重。</td></tr>
+          <tr><td>离线 tail</td><td>正/负大偏移都有样本；control sign 高；lane/heading 不是常数坍缩。</td><td>若仍坍缩，启动 <code>tailgate_thr002_6k</code>，把 active threshold 降到 0.02。</td></tr>
           <tr><td>100m gate</td><td>5/5 clean 到 100m。</td><td>读取 trace，按失败方向生成下一批 DAgger；暂停 1km。</td></tr>
           <tr><td>1km gate</td><td>5/5 clean 到 1000m。</td><td>先按路线和偏移方向定位失败；只有接近成功时再考虑 ViT small。</td></tr>
           <tr><td>红绿灯</td><td>1km clean 且无 red-light violation。</td><td>加入 traffic-light state/stop-line data，而不是先加天气。</td></tr>
@@ -211,6 +211,10 @@
           <tr><td><code>aux</code></td><td>从当前图像 latent 读出 speed/lane/heading 等状态的辅助头。</td></tr>
           <tr><td><code>pred_aux</code></td><td>从预测未来 latent 读出下一步状态，直接服务 rollout lane-keep。</td></tr>
           <tr><td><code>controlsign</code></td><td>新增 loss：由预测 lane/heading 算出的 steering 必须与 teacher steering 同方向。</td></tr>
+          <tr><td><code>appliednext</code></td><td>把闭环 eval trace 中下一行实际 applied action 作为当前状态的动作标签，避免 teacher/action 与真实转移不匹配。</td></tr>
+          <tr><td><code>tailgate</code></td><td>针对失败尾部分布的训练和筛选策略；当前配置大量重复失败帧，并按 validation checkpoint 做 failure-tail 排名。</td></tr>
+          <tr><td><code>thr002</code></td><td>低 active threshold 备选配置，把 control-sign loss 的有效 steering 门槛从 0.08 降到 0.02，用来覆盖小但持续累积的偏移。</td></tr>
+          <tr><td><code>lane invasion</code></td><td>CARLA 车道线侵入传感器；现在作为 primary safety failure 记录和可选停止条件。</td></tr>
           <tr><td><code>DAgger</code></td><td>把模型闭环失败时遇到的状态重新用 teacher 标注，再加入训练，修补分布偏移。</td></tr>
           <tr><td><code>IFD</code></td><td>infraction-free distance，首次硬违规前行驶的距离。</td></tr>
           <tr><td><code>W&B</code></td><td>Weights & Biases，用于在线记录 loss、验证指标、run 链接和配置。</td></tr>

@@ -1,22 +1,24 @@
 # Next Execution Plan: D1 1km City Driving
 
-Last updated: 2026-05-24 14:18 Asia/Shanghai.
+Last updated: 2026-05-25 11:40 Asia/Shanghai.
 
-## Immediate 2026-05-24 Plan
+## Immediate 2026-05-25 Plan
 
-The current branch is no longer action-only BC. The active branch is `cls_mean + rollout aux + control-sign + DAgger`, because the last closed-loop failure showed a clear wrong-sign lane prediction under large positive lane offset.
+The current branch is `cls_mean + rollout aux + control-sign + aligned applied-action DAgger`. It uses the model-applied actions from the next eval trace row, so the training action label matches the transition from the saved frame/state to the next state.
 
 Current execution sequence:
 
-1. Finish the active W&B run `d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k`.
-2. Run offline rollout diagnostics with `scripts/analyze_aux_perception.py` and require tail/control-sign evidence before CARLA.
-3. Run a 100m gate on routes `[3, 4, 6, 10, 12]`.
-4. Run the 1km gate only if the 100m gate is `5/5` clean.
-5. If 100m fails, inspect action traces by failure direction, save frames, convert a new DAgger HDF5, and retrain.
+1. Continue monitoring `d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_6k`.
+2. After each validation checkpoint, run `scripts/rank_aux_tail_checkpoints.py` on the aligned appliednext failure dataset.
+3. Promote a checkpoint to CARLA only if failure-tail diagnostics show both correct steering direction and calibrated lane/heading values.
+4. Run a 100m gate on routes `[3, 4, 6, 10, 12]` with collision/offroad/lane-invasion/red-light/blocked stopping enabled.
+5. Run the 1km gate only if the 100m gate is `5/5` clean.
+6. If the active run keeps producing near-constant corrective steering, stop it and launch `configs/train_d1_tiny_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_thr002_6k.yaml`.
+7. If 100m fails, inspect `spawn_index`, `termination_reason`, action traces, and frame contact sheets; then convert another aligned applied-action DAgger slice.
 
 Current No-Go rule: do not spend 1km CARLA evaluation time after a branch fails 100m. The previous corrected 100m gate reached only `11.73m` mean Safety IFD with `5/5` off-road failures.
 
-Current Go rule: promote a branch to 1km only when offline control-sign accuracy is at least about `0.90` on active steering samples and the 100m closed-loop gate is clean.
+Current Go rule: promote a branch to 100m only when offline failure-tail control sign is high and the lane/heading prediction is not a collapsed constant; promote to 1km only when the 100m closed-loop gate is clean.
 
 ## Long-Horizon Goal
 
@@ -35,7 +37,7 @@ That means the next task should not be "optimize speed compliance first." The ne
 
 ```text
 Drive as far as possible on a simple city street with no other vehicles.
-Primary failures: collision, off-road / lane departure into roadside, blocked.
+Primary failures: collision, off-road / lane departure into roadside, lane invasion, blocked.
 Secondary failure: red-light violation.
 Tertiary penalty: speed-limit violation.
 ```
@@ -64,7 +66,7 @@ Purpose: isolate vision, steering, road-boundary awareness, and long-horizon dri
 - Maneuvers: include natural straight, curve, and intersection driving from fixed routes. This covers left/right road geometry when the route naturally turns.
 - Commanded lane changes are intentionally deferred until route-command labels exist. In a no-traffic setting, "change lane now" is not a well-defined target unless the dataset includes an explicit command or navigation objective.
 - Episode target: `1000m` closed-loop cap.
-- Primary metric: `Safety IFD`, meters before collision, off-road, or blocked.
+- Primary metric: `Safety IFD`, meters before collision, off-road, lane invasion, or blocked.
 - Secondary logs: lane offset, heading error, action trace, contact sheet.
 - Speed: soft penalty only; do not stop the episode on normal speed-limit violations.
 
@@ -109,9 +111,9 @@ Report these metrics together:
 
 | Priority | Metric | Meaning |
 |---|---|---|
-| 1 | `mean_infraction_free_distance_m` with `speed_limit_as_infraction: false` | distance before collision/off-road/red-light/blocked, depending on config |
-| 1 | `success_rate_no_primary_safety_infraction` | no collision, no off-road, no blocked |
-| 2 | `success_rate_no_primary_or_red_infraction` | no collision, off-road, red-light, or blocked |
+| 1 | `mean_infraction_free_distance_m` with `speed_limit_as_infraction: false` | distance before collision/off-road/lane-invasion/red-light/blocked, depending on config |
+| 1 | `success_rate_no_primary_safety_infraction` | no collision, no off-road, no lane invasion, no blocked |
+| 2 | `success_rate_no_primary_or_red_infraction` | no collision, off-road, lane invasion, red-light, or blocked |
 | 3 | `speed_limit_count` | soft speed-rule violations |
 | 3 | `mean_mini_driving_score` | route completion with all penalties, including speed |
 

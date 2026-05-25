@@ -1,21 +1,20 @@
 # Current Execution Status
 
-Last checked: 2026-05-24 14:18 Asia/Shanghai.
+Last checked: 2026-05-25 11:40 Asia/Shanghai.
 
 ## Latest 1km Goal Update
 
 The active stop condition is unchanged: continue exploration until a learned model can drive at least `1km` on the simplified CARLA city route without lane/roadside departure, collision, blocked failure, or red-light violation.
 
-The current mainline is `cls_mean + rollout aux + control-sign + DAgger`. The previous `cls_mean` rollout model improved offline lane perception but failed the 100m closed-loop gate. After fixing runtime evaluation so top-level `lane_keep` parameters are actually merged into `eval`, the model reached mean Safety IFD `11.73m` over routes `[3, 4, 6, 10, 12]`, with `5/5` off-road failures and no collision/red-light/blocked failures. Action traces show the core failure: true lane offset reaches about `+1.7m` to `+1.8m`, while predicted `aux_lane_offset_m` remains negative, so the lane-keep controller steers in the wrong direction.
+The current mainline is `cls_mean + rollout aux + control-sign + aligned applied-action DAgger`. The previous `cls_mean` rollout model improved offline lane perception but failed the 100m closed-loop gate. After fixing runtime evaluation so top-level `lane_keep` parameters are actually merged into `eval`, the model reached mean Safety IFD `11.73m` over routes `[3, 4, 6, 10, 12]`, with `5/5` off-road failures and no collision/red-light/blocked failures. Action traces show the core failure: true lane offset reaches about `+1.7m` to `+1.8m`, while predicted `aux_lane_offset_m` remains negative, so the lane-keep controller steers in the wrong direction.
 
-The new DAgger dataset `data/d1_city_free_drive_dagger/carla_d1_city_free_drive_clsmean_fail_step1818_100m_fast.h5` was generated from the corrected 100m failure run. It contains `334` frames; `|lane_offset| > 0.5m` accounts for `41.9%`, and `|lane_offset| > 1.0m` accounts for `23.7%`. This directly covers the missing closed-loop tail distribution.
+The valid DAgger dataset for the active branch is `data/d1_city_free_drive_dagger/carla_d1_city_free_drive_clsmean_fail_step1818_100m_appliednext_fast.h5`. It uses model-applied closed-loop actions aligned from the next trace row, because row `i` in an eval trace is the action that produced saved state `i`, while a training sample at frame/state `i` needs the action for transition `i -> i+1`. The dataset contains `329` frames across five failed episodes; `|lane_offset| > 0.5m` accounts for `41.0%`, `|lane_offset| > 1.0m` accounts for `22.5%`, and offroad frames are excluded.
 
-Two code fixes are now pushed:
+The same-row applied-action DAgger run is invalid and should not be used for conclusions. The corrected aligned-appliednext 8k run improved failure-tail lane correlation to about `0.66`, but its control-sign stability plateaued around `0.6-0.7`, below the gate for CARLA evaluation.
 
-- `5e5cf88` adds `cls_mean` control-sign losses and a control-sign training config.
-- `8239efe` makes evaluation, diagnostics, and DAgger conversion honor the configured top-level `lane_keep` block.
+The active serious run is now `d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_6k`, W&B run id `d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_contr-20260525-111653-42200fc9`. It uses batch size `256`, W&B online, local CSV metrics, and per-validation checkpoints. Epoch 1 saved `epoch001_step000470.pt`; failure-tail diagnostics show high corrective steering sign (`overall sign=0.974`, `control-tail sign=0.977`, `lane-tail sign=0.956`) but poor lane calibration (`lane_corr=-0.114`, `lane MAE=0.564m`). The epoch-1 checkpoint is therefore not promoted to CARLA 100m.
 
-The current serious run is active on the RTX 5090 with W&B online: `d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k`, W&B run id `d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_contr-20260524-141716-74c008af`. Batch size `256` passed with `24.39GB` allocated peak in the batch probe, and local metrics are being written under `outputs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_8k/`.
+Evaluation has been tightened: the 1km simple gate now records CARLA `sensor.other.lane_invasion`, writes `lane_invasion_count`, `spawn_index`, and `termination_reason`, and can stop on lane invasion. The headline 1km target now means no collision, offroad, lane invasion, blocked failure, or red-light violation. A low-threshold fallback config is ready as `configs/train_d1_tiny_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_tailgate_thr002_6k.yaml`; it keeps the same architecture/data and lowers `aux_control_active_threshold` from `0.08` to `0.02` if the active run remains a near-constant corrective-steer model.
 
 ## Verdict
 
