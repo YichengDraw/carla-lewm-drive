@@ -23,7 +23,10 @@ def parse_args() -> argparse.Namespace:
         "--action-source",
         choices=["teacher", "applied"],
         default="teacher",
-        help="Use teacher lane-keep actions or the actions actually applied in the closed-loop trace.",
+        help=(
+            "Use teacher lane-keep actions computed from each saved frame, or next-row applied trace actions "
+            "aligned as current frame -> next simulator tick."
+        ),
     )
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
@@ -77,7 +80,7 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any], *, action_source: str = "t
         route = route_for_episode(eval_cfg, episode_idx)
         rows = read_trace(trace_path)
         episode_frames = 0
-        for row in rows:
+        for row_idx, row in enumerate(rows):
             step = int(float(row["step"]))
             image_path = frame_path(eval_dir, episode_idx, step)
             if not image_path.exists():
@@ -89,7 +92,13 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any], *, action_source: str = "t
             if action_source == "teacher":
                 action = lane_keep_action(lane_offset, heading_error, speed_mps, eval_cfg)
             else:
-                action = row_applied_action(row)
+                if row_idx + 1 >= len(rows):
+                    continue
+                next_row = rows[row_idx + 1]
+                next_step = int(float(next_row["step"]))
+                if next_step != step + 1:
+                    continue
+                action = row_applied_action(next_row)
 
             pixels.append(rgb)
             actions.append(action.astype(np.float32))
@@ -139,6 +148,10 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any], *, action_source: str = "t
     }
 
 
+def action_alignment(action_source: str) -> str:
+    return "same_frame_teacher" if action_source == "teacher" else "next_row_applied"
+
+
 def write_hdf5(data: dict[str, np.ndarray], path: Path, *, overwrite: bool, action_source: str = "teacher") -> None:
     if path.exists() and not overwrite:
         raise FileExistsError(f"{path} exists; pass --overwrite")
@@ -152,6 +165,7 @@ def write_hdf5(data: dict[str, np.ndarray], path: Path, *, overwrite: bool, acti
                 f.create_dataset(key, data=value)
         f.attrs["format"] = "carla_lewm_drive_eval_dagger_v1"
         f.attrs["action_source"] = action_source
+        f.attrs["action_alignment"] = action_alignment(action_source)
 
 
 def main() -> None:
@@ -162,6 +176,7 @@ def main() -> None:
     report = {
         "output": str(args.output),
         "action_source": args.action_source,
+        "action_alignment": action_alignment(args.action_source),
         "frames": int(data["pixels"].shape[0]),
         "episodes": int(data["ep_len"].shape[0]),
         "lane_offset_abs_gt_0p5": float(np.mean(np.abs(data["lane_offset_m"]) > 0.5)),

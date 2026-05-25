@@ -1,7 +1,7 @@
 run:
-  name: d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_applied_8k
+  name: d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_8k
   seed: 5135
-  output_dir: outputs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_applied_8k
+  output_dir: outputs/d1_tiny_h3_fs5_auxpred_lane_perception_clsmean_wide_noroute_rollout_dagger_controlsign_appliednext_8k
 
 data:
   dataset_paths:
@@ -10,7 +10,7 @@ data:
     - data/d1_city_free_drive_long_recovery/carla_d1_city_free_drive_long_recovery_fast.h5
     - data/d1_city_free_drive_wide_recovery/carla_d1_city_free_drive_wide_recovery_fast.h5
     - data/d1_city_free_drive_dagger/carla_d1_city_free_drive_dagger_rollout_step1743_fast.h5
-    - data/d1_city_free_drive_dagger/carla_d1_city_free_drive_clsmean_fail_step1818_100m_applied_fast.h5
+    - data/d1_city_free_drive_dagger/carla_d1_city_free_drive_clsmean_fail_step1818_100m_appliednext_fast.h5
   dataset_repeat_factors: [1, 2, 2, 10, 20, 80]
   frameskip: 5
   history_size: 3
@@ -78,6 +78,6 @@ wandb:
   enabled: true
   entity: yicheng132024-southern-university-of-science-technology
   project: carla-lewm-drive
-  group: d1-auxpred-lane-perception-clsmean-controlsign-applied-dagger
+  group: d1-auxpred-lane-perception-clsmean-controlsign-appliednext-dagger
   resume: never
   mode: online

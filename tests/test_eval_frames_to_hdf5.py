@@ -8,10 +8,11 @@ from PIL import Image
 from scripts.eval_frames_to_hdf5 import convert, write_hdf5
 
 
-def write_eval_trace(eval_dir, *, applied=(0.11, 0.22, 0.33)):
+def write_eval_trace(eval_dir, *, applied=(0.11, 0.22, 0.33), next_applied=(0.44, -0.55, 0.66)):
     frame_dir = eval_dir / "frames" / "episode_000"
     frame_dir.mkdir(parents=True)
     Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)).save(frame_dir / "step_00001.jpg")
+    Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)).save(frame_dir / "step_00002.jpg")
     with (eval_dir / "actions_episode_000.csv").open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f,
@@ -31,22 +32,23 @@ def write_eval_trace(eval_dir, *, applied=(0.11, 0.22, 0.33)):
             ],
         )
         writer.writeheader()
-        writer.writerow(
-            {
-                "step": 1,
-                "route_progress_m": 2.5,
-                "speed_mps": 2.0,
-                "throttle": applied[0],
-                "steer": applied[1],
-                "brake": applied[2],
-                "lane_offset_m": 1.0,
-                "heading_error_rad": 0.0,
-                "offroad": 0,
-                "collision_count": 0,
-                "red_light": 0,
-                "blocked": 0,
-            }
-        )
+        for step, row_applied in [(1, applied), (2, next_applied)]:
+            writer.writerow(
+                {
+                    "step": step,
+                    "route_progress_m": 2.5 + step,
+                    "speed_mps": 2.0,
+                    "throttle": row_applied[0],
+                    "steer": row_applied[1],
+                    "brake": row_applied[2],
+                    "lane_offset_m": 1.0,
+                    "heading_error_rad": 0.0,
+                    "offroad": 0,
+                    "collision_count": 0,
+                    "red_light": 0,
+                    "blocked": 0,
+                }
+            )
 
 
 def eval_cfg():
@@ -72,7 +74,8 @@ def test_convert_can_use_applied_trace_actions(tmp_path):
 
     data = convert(tmp_path, eval_cfg(), action_source="applied")
 
-    assert data["action"][0].tolist() == pytest.approx([0.11, 0.22, 0.33])
+    assert data["action"].shape[0] == 1
+    assert data["action"][0].tolist() == pytest.approx([0.44, -0.55, 0.66])
 
 
 def test_convert_teacher_action_keeps_lane_keep_label(tmp_path):
@@ -80,6 +83,7 @@ def test_convert_teacher_action_keeps_lane_keep_label(tmp_path):
 
     data = convert(tmp_path, eval_cfg(), action_source="teacher")
 
+    assert data["action"].shape[0] == 2
     assert data["action"][0, 1] == pytest.approx(-0.2)
     assert data["action"][0].tolist() != pytest.approx([0.11, 0.22, 0.33])
 
@@ -93,3 +97,4 @@ def test_write_hdf5_records_action_source(tmp_path):
 
     with h5py.File(output, "r") as f:
         assert f.attrs["action_source"] == "applied"
+        assert f.attrs["action_alignment"] == "next_row_applied"
