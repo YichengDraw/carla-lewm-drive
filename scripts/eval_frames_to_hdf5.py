@@ -19,6 +19,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-dir", type=Path, required=True)
     parser.add_argument("--eval-config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--action-source",
+        choices=["teacher", "applied"],
+        default="teacher",
+        help="Use teacher lane-keep actions or the actions actually applied in the closed-loop trace.",
+    )
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
@@ -37,7 +43,18 @@ def route_for_episode(eval_cfg: dict[str, Any], episode_idx: int) -> int:
     return int(routes[episode_idx % len(routes)])
 
 
-def convert(eval_dir: Path, eval_cfg: dict[str, Any]) -> dict[str, Any]:
+def row_applied_action(row: dict[str, str]) -> np.ndarray:
+    try:
+        return np.asarray([float(row["throttle"]), float(row["steer"]), float(row["brake"])], dtype=np.float32)
+    except KeyError as exc:
+        missing = str(exc).strip("'")
+        raise KeyError(f"Trace row is missing {missing!r}; applied action source requires throttle, steer, and brake") from exc
+
+
+def convert(eval_dir: Path, eval_cfg: dict[str, Any], *, action_source: str = "teacher") -> dict[str, Any]:
+    if action_source not in {"teacher", "applied"}:
+        raise ValueError(f"Unknown action_source {action_source!r}; expected 'teacher' or 'applied'")
+
     pixels: list[np.ndarray] = []
     actions: list[np.ndarray] = []
     state: list[np.ndarray] = []
@@ -69,10 +86,13 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any]) -> dict[str, Any]:
             speed_mps = float(row["speed_mps"])
             lane_offset = float(row["lane_offset_m"])
             heading_error = float(row["heading_error_rad"])
-            teacher = lane_keep_action(lane_offset, heading_error, speed_mps, eval_cfg)
+            if action_source == "teacher":
+                action = lane_keep_action(lane_offset, heading_error, speed_mps, eval_cfg)
+            else:
+                action = row_applied_action(row)
 
             pixels.append(rgb)
-            actions.append(teacher.astype(np.float32))
+            actions.append(action.astype(np.float32))
             state.append(np.asarray([0.0, 0.0, 0.0, speed_mps, float(row["route_progress_m"]), lane_offset], dtype=np.float32))
             proprio.append(np.asarray([speed_mps, lane_offset, heading_error], dtype=np.float32))
             speed.append(speed_mps)
@@ -119,7 +139,7 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def write_hdf5(data: dict[str, np.ndarray], path: Path, *, overwrite: bool) -> None:
+def write_hdf5(data: dict[str, np.ndarray], path: Path, *, overwrite: bool, action_source: str = "teacher") -> None:
     if path.exists() and not overwrite:
         raise FileExistsError(f"{path} exists; pass --overwrite")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,15 +151,17 @@ def write_hdf5(data: dict[str, np.ndarray], path: Path, *, overwrite: bool) -> N
             else:
                 f.create_dataset(key, data=value)
         f.attrs["format"] = "carla_lewm_drive_eval_dagger_v1"
+        f.attrs["action_source"] = action_source
 
 
 def main() -> None:
     args = parse_args()
     cfg = runtime_eval_config(load_yaml(args.eval_config))
-    data = convert(args.eval_dir, cfg)
-    write_hdf5(data, args.output, overwrite=args.overwrite)
+    data = convert(args.eval_dir, cfg, action_source=args.action_source)
+    write_hdf5(data, args.output, overwrite=args.overwrite, action_source=args.action_source)
     report = {
         "output": str(args.output),
+        "action_source": args.action_source,
         "frames": int(data["pixels"].shape[0]),
         "episodes": int(data["ep_len"].shape[0]),
         "lane_offset_abs_gt_0p5": float(np.mean(np.abs(data["lane_offset_m"]) > 0.5)),
