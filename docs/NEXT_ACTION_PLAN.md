@@ -1,6 +1,6 @@
 # Next Execution Plan: D1 1km City Driving
 
-Last updated: 2026-05-26 17:55 Asia/Shanghai.
+Last updated: 2026-05-26 18:20 Asia/Shanghai.
 
 ## Current 2026-05-26 Status
 
@@ -16,38 +16,41 @@ The task definition has been narrowed to the useful first gate:
 Current evidence:
 
 - Oracle `lane_keep` can finish the 1km simplified route, so the simulator task is feasible.
-- Tiny learned variants improved from roughly `170-190m` to `204m` with `ft31 patchlane tail150`, `218m` with `ft32 patchlane tail180`, and `260-264m` with `ft33 tail190 retry` under isolated port `2110` route6 evals.
-- `ft34 tail220 laneonly` did not improve the failure-tail gate. On the ft33 tail220 diagnostic slice it had stronger overall sign than ft33 but failed the important `abs_lane_offset_gt_0p25` / `0p35` corrective direction, so it was not promoted to CARLA.
-- `ft35 temporal_aux + lane/heading sign` completed cleanly with W&B online. Best checkpoint was epoch `7` / step `1260`, with `best val/loss=0.919829`. The final epoch `10` / step `1800` rose to `val/loss=0.968075`, so `best.pt` is the checkpoint to evaluate.
-- The `ft35` training run did not prove the goal: the closed-loop 1km result is still unverified, and the first long offline gate attempt was interrupted by SSH closing during key exchange before the complete JSON summary could be written.
+- Tiny learned variants improved from roughly `170-190m` to `204.38m` with `ft31 patchlane tail150`, `217.69m` with `ft32 patchlane tail180`, and `265.03m` with `ft33 tail190 retry` plus `lg120_h0`.
+- `ft34 tail220 laneonly` completed but regressed to `248.81m`; `ft35 temporal_aux + lane/heading sign` completed and reached `249.80m` best / `249.90m` last. Both failed by `lane_invasion` with collision/offroad/red-light/blocked counts at `0`.
+- `ft35 temporal_aux + lane/heading sign` trained cleanly with W&B online. Best checkpoint was epoch `7` / step `1260`, with `best val/loss=0.919829`. The final epoch `10` / step `1800` rose to `val/loss=0.968075`, so `best.pt` is the checkpoint to use for robust-filter eval.
+- The `ft35` training run did not prove the goal: it reproduced the roughly `250m` lane-invasion boundary rather than breaking it.
 - All current best closed-loop failures remain `lane_invasion`; collision/offroad/red-light/blocked counts are `0` in the simplified route6 runs.
-- The failure mechanism is still lane/heading perception instability near the boundary. Existing tail data covers many `0.25-0.36m` lane-offset frames, while closed-loop failure frames can reach about `0.43-0.49m`; the next data slice must include this harder boundary band.
+- The failure mechanism is still lane/heading perception sign/calibration failure near the boundary. In `ft35 retry`, the final trace has true `lane_offset_m=+0.325m` while model aux reports about `-0.057m`; last-60-frame lane sign accuracy is only about `0.417`.
 
 Active next branch:
 
-- `d1_tiny_h1_fs1_route6_perception_lane_ft36_temporal_delta_hardboundary_2200`
-- Config: `configs/train_d1_tiny_route6_perception_lane_ft36_fs1_temporal_delta_hardboundary_2200.yaml`
-- Purpose: continue from `ft35 retry` best, add explicit temporal lane/heading delta loss, and train on new hard-boundary failure-frame HDF5 converted from `ft35` route6 save-frames evals.
-- New code: `aux_temporal_delta_loss` in `src/carla_lewm_drive/driving_lewm/model.py`, logged as `aux_temporal_delta_loss`; local `tests/test_driving_model.py` passes.
+- `d1_tiny_h1_fs1_route6_perception_lane_ft37_temporal_aux_tail220_bce_sign_2400`
+- Config: `configs/train_d1_tiny_route6_perception_lane_ft37_fs1_temporal_aux_tail220_bce_sign_2400.yaml`
+- Purpose: continue from `ft33 retry` best, keep the same aux vector and checkpoint compatibility, and change lane/heading sign supervision from margin loss to BCE on the scalar lane/heading outputs.
+- New code: BCE mode in `scalar_sign_loss`; local tests cover BCE sign loss and robust perception-lane filtering. `aux_temporal_delta_loss` and `ft36 hardboundary` remain as fallback tooling if BCE-sign fails.
 - Monitoring: W&B required from launch, local `metrics.csv`, validation checkpoints every epoch, and failure-tail gates before CARLA promotion.
 - Current blocker: remote 5090 SSH port is reachable, but the server closes connections before SSH key exchange. Work can continue locally; remote sync/eval/train resumes when SSH recovers.
 
 Prepared remote-resume tooling:
 
 - Resumable gate script: `scripts/run_aux_tail_gate.py`. It writes JSON after every checkpoint, so another SSH drop will not erase two hours of diagnostics.
-- Hard-boundary frame configs:
+- Fair robust-filter eval config:
+  - `configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml`
+- ft37 training config:
+  - `configs/train_d1_tiny_route6_perception_lane_ft37_fs1_temporal_aux_tail220_bce_sign_2400.yaml`
+- Hard-boundary fallback configs:
   - `configs/eval_d1_route6_perception_lane_keep_ft35_fs1_temporal_aux_tail220_sign_lg080_hg060_failure_frames_x6_port2110.yaml`
   - `configs/eval_d1_route6_perception_lane_keep_ft35_fs1_temporal_aux_tail220_sign_lg120_h0_failure_frames_x6_port2110.yaml`
-- ft36 1km eval config:
-  - `configs/eval_d1_route6_perception_lane_keep_ft36_fs1_temporal_delta_hardboundary_lg120_h0_tick_1km_port2110.yaml`
+  - `configs/train_d1_tiny_route6_perception_lane_ft36_fs1_temporal_delta_hardboundary_2200.yaml`
 
 Immediate gate sequence:
 
-1. When SSH recovers, inspect `outputs/analysis/ft35_temporal_aux_gate/summary_perceive.json`. If absent or partial, rerun the gate with `scripts/run_aux_tail_gate.py`.
-2. If `ft35 retry best` beats `ft33 retry best` on both tail220 and tail190 sign/corrective metrics, run one route6 1km closed-loop eval on port `2110`.
-3. If `ft35` does not pass the gate or fails around `250-270m`, run the two `ft35` save-frames configs, convert them with `scripts/eval_frames_to_hdf5.py`, and train `ft36`.
-4. Promote `ft36` to CARLA only after its failure-tail metrics beat `ft33/ft35`, especially `abs_lane_offset_gt_0p25`, `abs_lane_offset_gt_0p35`, and corrective mean.
-5. If route6 exceeds `300m`, run repeated route6 episodes before the full `1km` gate.
+1. When SSH recovers, sync BCE-sign/filter code and run the fair robust-filter eval on `ft35 retry best` using `configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml` with the `ft35` checkpoint override.
+2. If the robust-filter eval still fails around `250m`, train `ft37` with W&B online from process start.
+3. Promote a `ft37` checkpoint to CARLA only after validation improves and failure-tail sign metrics beat the `ft35` tail profile.
+4. If route6 exceeds `300m`, run repeated route6 episodes before the full `1km` gate.
+5. If `ft37` still fails around `250m`, collect new hard-boundary failure frames, convert them with `scripts/eval_frames_to_hdf5.py`, and run the `ft36 hardboundary` fallback.
 6. Only after single-weather no-traffic safety works, run real traffic-light and mixed-weather gates.
 
 ## Immediate 2026-05-25 Plan

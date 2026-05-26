@@ -76,7 +76,7 @@
     <p>读法：先看当前结论和 Go / No-Go，再看每个阶段的证据。当前硬停止条件是 learned model 在简化城市街道无压线、无离路、无碰撞、无阻塞、无红灯违规地行驶至少 1km。</p>
   </header>
   <div class="toolbar">
-    <input id="search" placeholder="搜索 cls_mean / controlsign / DAgger / W&B / 1km">
+    <input id="search" placeholder="搜索 ft37 / robust-filter / lane sign / W&B / 1km">
     <button id="prev" type="button">&lt;</button>
     <button id="next" type="button">&gt;</button>
     <span id="count" class="tag">0</span>
@@ -102,14 +102,14 @@
         <h2>当前结论</h2>
         <div class="metrics">
           <div class="metric"><span>硬目标</span><strong>1km</strong><span>无离路、碰撞、阻塞、红灯违规</span></div>
-          <div class="metric"><span>当前主线</span><strong>prepared</strong><span><code>ft36 temporal_delta_hardboundary</code>：补 hard-boundary failure frames，并约束 lane/heading 逐帧变化</span></div>
-          <div class="metric"><span>最好闭环</span><strong>260-264m</strong><span><code>ft33 tail190 retry</code> 在 port2110 route6 上失败于 lane invasion</span></div>
+          <div class="metric"><span>当前主线</span><strong>prepared</strong><span><code>ft37 BCE-sign</code>：先评估 ft35 robust-filter；若仍约 250m，再启动 BCE 符号监督训练</span></div>
+          <div class="metric"><span>最好闭环</span><strong>265.03m</strong><span><code>ft33 tail190 retry</code> 失败于 lane invasion</span></div>
           <div class="metric"><span>硬失败类型</span><strong>lane sign</strong><span>弯道末端 lane offset 符号/幅度校准不稳</span></div>
           <div class="metric"><span>红灯/碰撞</span><strong>0</strong><span>当前简化场景无碰撞、无 offroad、无红灯违规</span></div>
-          <div class="metric"><span>最新训练</span><strong>0.9198</strong><span><code>ft35 temporal_aux sign retry</code> best val/loss，闭环 1km 仍未证明</span></div>
+          <div class="metric"><span>最新闭环</span><strong>249.90m</strong><span><code>ft35 temporal_aux sign retry</code> best/last 都在约 250m lane invasion</span></div>
         </div>
         <div class="callout">
-          当前判断：任务定义已经收窄到合理的 D1-simple 城市自由行驶。oracle lane-keep 可以跑 1km，说明 CARLA 场景本身可行；学习模型目前卡在 route6 约 260m 的弯道/车道边界。ft34 lane-only 没有通过离线门控，ft35 temporal sign 虽然训练曲线正常，但完整离线门控被远程 SSH 中断。下一轮优先补 0.4-0.5m hard-boundary failure 数据，并用 temporal delta loss 抑制逐帧翻符号。
+          当前判断：任务定义已经收窄到合理的 D1-simple 城市自由行驶。oracle lane-keep 可以跑 1km，说明 CARLA 场景本身可行；学习模型目前卡在 route6 约 250m 的弯道/车道边界。ft34 lane-only 和 ft35 temporal sign 都没有突破，根因仍是闭环尾部视觉 lane/heading 符号读错。下一步先用只作用于模型 aux 输出的 robust-filter 判断是否是抖动；如果仍失败，就训练 ft37 BCE-sign。
         </div>
       </section>
 
@@ -134,9 +134,10 @@
           <tr><td><code>ft32 patchlane tail180</code></td><td>route6 到 217.69m；red/collision/offroad 均为 0。</td><td>更多尾部数据带来小幅提升，但收益变慢。</td></tr>
           <tr><td><code>ft33 patchlane tail190 retry</code></td><td>route6 到 265.03m；red/collision/offroad 均为 0。</td><td>当前最佳；失败尾部 lane sign 仍不稳，<code>lg120_h0</code> 下最后 150 帧 sign acc 约 0.49。</td></tr>
           <tr><td><code>ft34 tail220 laneonly</code></td><td>248.81m lane invasion；red/collision/offroad/blocked 均为 0。</td><td>只看 lane correction 没有解决符号错误，且低于 ft33。</td></tr>
-          <tr><td><code>ft35 temporal_aux sign</code></td><td>训练完成；best epoch 7 / step 1260，<code>best val/loss=0.919829</code>。</td><td>完整 offline gate 尚未验证；第一次长门控被 SSH 断开打断。</td></tr>
-          <tr><td><code>ft36 temporal_delta_hardboundary</code></td><td>配置已准备，等待远程 SSH 恢复后采样 hard-boundary failure frames 并训练。</td><td>直接针对当前 260m 附近 lane invasion：补更靠近车道边界的状态，并约束 lane/heading 变化不要逐 tick 翻符号。</td></tr>
-          <tr><td><code>ft37 BCE-sign</code></td><td>保留为备选配置。</td><td>如果 hard-boundary 数据仍不能稳定侧别，再用 BCE sign 或 boundary bins 强化离散方向判断。</td></tr>
+          <tr><td><code>ft35 temporal_aux sign</code></td><td>best 249.80m，last 249.90m；red/collision/offroad/blocked 均为 0。</td><td>margin sign loss 和 temporal residual 仍然在尾部把正 lane 读成负 lane。</td></tr>
+          <tr><td><code>ft37 robust-filter eval</code></td><td>配置已准备，等待远程 SSH 恢复后先套在 <code>ft35 retry best</code> 上评估。</td><td>只平滑模型 aux 输出，不使用 CARLA lane 真值；用来区分瞬时翻符号和系统性误读。</td></tr>
+          <tr><td><code>ft37 BCE-sign</code></td><td>配置已准备，等待 robust-filter 结果；若仍约 250m，则启动训练。</td><td>不扩展 aux 维度，直接用 BCE 强化 lane/heading 标量的正负侧别。</td></tr>
+          <tr><td><code>ft36 temporal_delta_hardboundary</code></td><td>保留为 fallback。</td><td>如果 ft37 仍失败，再采样 hard-boundary failure frames 并加入 temporal delta 约束。</td></tr>
         </table>
       </section>
 
@@ -162,17 +163,17 @@
           <tr>
             <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h1_fs1_route6_perception_lane_ft35_temporal_aux_tail220_sign_1800_retry-20260526-150715-54fe58ba"><code>d1_tiny_h1_fs1_route6_perception_lane_ft35_temporal_aux_tail220_sign_1800_retry</code></a></td>
             <td><code>ft35 retry</code> 加 temporal aux residual、lane sign、heading sign；best epoch 7 / step 1260。</td>
-            <td><span class="tag warn">trained</span> 训练完成，完整 offline gate 待远程恢复后续跑。</td>
+            <td><span class="tag bad">249.90m</span> best/last 都在约 250m lane invasion。</td>
           </tr>
           <tr>
             <td><code>d1_tiny_h1_fs1_route6_perception_lane_ft36_temporal_delta_hardboundary_2200</code></td>
             <td><code>ft36</code> 从 ft35 best 初始化，加入 hard-boundary failure HDF5，并新增 <code>aux_temporal_delta_loss</code>。</td>
-            <td><span class="tag warn">prepared</span> 先采样/转换 failure frames，再用 W&B 在线训练。</td>
+            <td><span class="tag warn">fallback</span> ft37 后仍失败时再采样/转换 failure frames。</td>
           </tr>
           <tr>
             <td><code>d1_tiny_h1_fs1_route6_perception_lane_ft37_temporal_aux_tail220_bce_sign_2400</code></td>
             <td><code>ft37</code> 把 lane/heading sign 从 margin 改为 BCE，并保留 patch lane / temporal aux。</td>
-            <td><span class="tag warn">backup</span> 作为 side/bin 方向前的符号监督备选。</td>
+            <td><span class="tag warn">prepared</span> robust-filter 仍卡 250m 时启动 W&B 在线训练。</td>
           </tr>
           <tr>
             <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h1_fs1_route6_perception_lane_ft32_patchlane_tail180_2000-20260526-132428-5d064c42"><code>d1_tiny_h1_fs1_route6_perception_lane_ft32_patchlane_tail180_2000</code></a></td>
@@ -192,7 +193,7 @@
         <details open>
           <summary>Phase 1: 车道边界闭环修复</summary>
           <p>目标：让模型在 route6 弯道处从约 200m 提升到至少 300m，再进入 1km 评估。退出条件是 failure-tail sign acc 明显提升，单次 closed-loop 不再在同一车道边界压线。</p>
-          <p>当前动作：先用 <code>scripts/run_aux_tail_gate.py</code> 续跑 <code>ft35 retry</code> 的 tail220/tail190 门控；如果不明显优于 ft33，就用两个 save-frames 配置采样 hard-boundary failure frames，转成 teacher HDF5 后训练 <code>ft36 temporal_delta_hardboundary</code>。如果 ft36 仍失败，再进入 BCE sign 或显式 boundary bins。</p>
+          <p>当前动作：远程 SSH 恢复后，先用 <code>configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml</code> 评估 <code>ft35 retry best</code>。如果仍在约 250m lane invasion，就启动 <code>ft37 BCE-sign</code>。如果 ft37 仍失败，再采样 hard-boundary failure frames 进入 <code>ft36 temporal_delta_hardboundary</code> fallback。</p>
         </details>
         <details open>
           <summary>Phase 2: 1km no-traffic / green-light</summary>
@@ -211,28 +212,20 @@
 
       <section id="commands" data-kind="train">
         <h2>关键命令</h2>
-        <h3>下一轮训练：ft36 temporal-delta hard-boundary</h3>
+        <h3>下一轮训练：ft37 BCE-sign</h3>
         <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
-  --config configs/train_d1_tiny_route6_perception_lane_ft36_fs1_temporal_delta_hardboundary_2200.yaml</code></pre>
-        <h3>可恢复 ft35 离线门控</h3>
-        <pre><code>PYTHONPATH=src .venv/bin/python scripts/run_aux_tail_gate.py \
-  --eval-config configs/eval_d1_route6_perception_lane_keep_ft35_fs1_temporal_aux_tail220_sign_lg080_hg060_tick_1km_port2110.yaml \
-  --dataset tail220 configs/analyze_d1_route6_ft33_tail220_failure.yaml \
-  --dataset tail190 configs/analyze_d1_route6_ft32_patchlane_tail190_failure.yaml \
-  --checkpoint ft33_retry_best outputs/d1_tiny_h1_fs1_route6_perception_lane_ft33_patchlane_tail190_1800_retry/best.pt \
-  --checkpoint ft35_retry_best outputs/d1_tiny_h1_fs1_route6_perception_lane_ft35_temporal_aux_tail220_sign_1800_retry/best.pt \
-  --checkpoint ft35_retry_last outputs/d1_tiny_h1_fs1_route6_perception_lane_ft35_temporal_aux_tail220_sign_1800_retry/last.pt \
-  --output outputs/analysis/ft35_temporal_aux_gate/summary_perceive.json</code></pre>
-        <h3>ft36 1km route6 gate</h3>
+  --config configs/train_d1_tiny_route6_perception_lane_ft37_fs1_temporal_aux_tail220_bce_sign_2400.yaml</code></pre>
+        <h3>ft35 robust-filter route6 gate</h3>
         <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d1_route6_perception_lane_keep_ft36_fs1_temporal_delta_hardboundary_lg120_h0_tick_1km_port2110.yaml</code></pre>
+  --config configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml \
+  --checkpoint outputs/d1_tiny_h1_fs1_route6_perception_lane_ft35_temporal_aux_tail220_sign_1800_retry/best.pt</code></pre>
       </section>
 
       <section id="gates" data-kind="eval">
         <h2>Go / No-Go</h2>
         <table>
           <tr><th>Gate</th><th>Go</th><th>No-Go 动作</th></tr>
-          <tr><td>训练稳定性</td><td><code>ft36 temporal_delta_hardboundary</code> 产生连续 train/val CSV 和 W&B 曲线，至少过第一个 validation。</td><td>若 W&B 或验证曲线缺失，先修训练协议，不进入 CARLA。</td></tr>
+          <tr><td>训练稳定性</td><td><code>ft37 BCE-sign</code> 产生连续 train/val CSV 和 W&B 曲线，至少过第一个 validation。</td><td>若 W&B 或验证曲线缺失，先修训练协议，不进入 CARLA。</td></tr>
           <tr><td>route6 300m gate</td><td>单次 closed-loop 超过 300m 且无 lane invasion。</td><td>若仍 200m 左右压线，加入 lane sign classifier/bin 或边界 teacher 数据。</td></tr>
           <tr><td>1km gate</td><td>5/5 clean 到 1000m；route6 单路先过 1km。</td><td>先按路线和偏移方向定位失败；不把速度当主瓶颈。</td></tr>
           <tr><td>红绿灯</td><td>1km clean 且无 red-light violation。</td><td>加入 traffic-light state/stop-line data，而不是先加天气。</td></tr>
