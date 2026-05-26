@@ -3,7 +3,7 @@ param(
   [string]$RemoteRoot = "/home/ubuntu/carla_lewm_drive",
   [int]$PollSeconds = 60,
   [int]$MonitorSeconds = 600,
-  [int]$MaxHours = 12,
+  [double]$MaxHours = 12.0,
   [switch]$NoTrain
 )
 
@@ -28,17 +28,25 @@ $sshOptions = @(
 function Write-WatchLog {
   param([Parameter(Mandatory=$true)][string]$Message)
   $line = "$(Get-Date -Format o) $Message"
-  $line | Tee-Object -FilePath $LogPath -Append
+  Add-Content -Path $LogPath -Value $line
+  Write-Host $line
 }
 
 function Test-RemoteSsh {
   $argv = @($sshOptions + @($HostName, "date -Is"))
-  $out = & ssh.exe @argv 2>&1
-  $ok = $LASTEXITCODE -eq 0
+  $oldPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $out = & ssh.exe @argv 2>&1
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $oldPreference
+  }
+  $ok = $code -eq 0
   if ($ok) {
     Write-WatchLog "ssh_ok $($out -join ' ')"
   } else {
-    Write-WatchLog "ssh_not_ready exit=$LASTEXITCODE $($out -join ' ')"
+    Write-WatchLog "ssh_not_ready exit=$code $($out -join ' ')"
   }
   return $ok
 }
@@ -46,10 +54,17 @@ function Test-RemoteSsh {
 function Invoke-RecoveryStep {
   param([Parameter(Mandatory=$true)][string]$Step)
   Write-WatchLog "step_begin $Step"
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Recovery -Step $Step -HostName $HostName 2>&1 |
-    Tee-Object -FilePath $LogPath -Append
-  if ($LASTEXITCODE -ne 0) {
-    throw "recovery step failed: $Step exit=$LASTEXITCODE"
+  $oldPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Recovery -Step $Step -HostName $HostName 2>&1 |
+      Tee-Object -FilePath $LogPath -Append
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $oldPreference
+  }
+  if ($code -ne 0) {
+    throw "recovery step failed: $Step exit=$code"
   }
   Write-WatchLog "step_ok $Step"
 }
@@ -75,9 +90,16 @@ PY
 '@
   $cmd = $cmd.Replace("__REMOTE_ROOT__", $RemoteRoot)
   $argv = @($sshOptions + @($HostName, $cmd))
-  $out = & ssh.exe @argv 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    throw "summary read failed exit=$LASTEXITCODE $($out -join ' ')"
+  $oldPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $out = & ssh.exe @argv 2>&1
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $oldPreference
+  }
+  if ($code -ne 0) {
+    throw "summary read failed exit=$code $($out -join ' ')"
   }
   $text = ($out -join "`n").Trim()
   Write-WatchLog "latest_eval_summary $text"
