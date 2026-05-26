@@ -1,6 +1,6 @@
 # Next Execution Plan: D1 1km City Driving
 
-Last updated: 2026-05-26 18:20 Asia/Shanghai.
+Last updated: 2026-05-26 18:40 Asia/Shanghai.
 
 ## Current 2026-05-26 Status
 
@@ -30,12 +30,13 @@ Active next branch:
 - Purpose: continue from `ft33 retry` best, keep the same aux vector and checkpoint compatibility, and change lane/heading sign supervision from margin loss to BCE on the scalar lane/heading outputs.
 - New code: BCE mode in `scalar_sign_loss`; local tests cover BCE sign loss and robust perception-lane filtering. `aux_temporal_delta_loss` and `ft36 hardboundary` remain as fallback tooling if BCE-sign fails.
 - Monitoring: W&B required from launch, local `metrics.csv`, validation checkpoints every epoch, and failure-tail gates before CARLA promotion.
-- Current blocker: remote 5090 SSH port is reachable, but the server closes connections before SSH key exchange. Work can continue locally; remote sync/eval/train resumes when SSH recovers.
+- Current blocker: remote 5090 is not reachable through the current Windows route. Sangfor SSL VPN is disconnected, direct WLAN binding times out, and the mihomo tunnel gives a false TCP success followed by SSH disconnect. Work can continue locally; remote sync/eval/train resumes when SSH or VPN recovers.
 
 Prepared remote-resume tooling:
 
 - Remote recovery script: `scripts/remote_route6_ft37_recovery.ps1`. Use `-Step probe`, `-Step sync`, `-Step start-carla`, `-Step eval-ft35-filter`, `-Step train-ft37`, or `-Step monitor-ft37`.
 - Resumable gate script: `scripts/run_aux_tail_gate.py`. It writes JSON after every checkpoint, so another SSH drop will not erase two hours of diagnostics.
+- Local recovery watcher: `scripts/watch_remote_route6_recovery.ps1`. It polls SSH, then runs the remote recovery steps; if the ft35 robust-filter eval does not pass 1km, it launches `ft37` and records 10-minute monitor snapshots.
 - Fair robust-filter eval config:
   - `configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml`
 - ft37 training config:

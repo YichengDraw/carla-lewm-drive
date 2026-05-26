@@ -1,6 +1,6 @@
 # Current Execution Status
 
-Last checked: 2026-05-26 18:20 Asia/Shanghai.
+Last checked: 2026-05-26 18:40 Asia/Shanghai.
 
 ## 2026-05-26 Route6 Safety Snapshot
 
@@ -18,6 +18,7 @@ Current route6 evidence is now more specific than the older D1 action-policy bra
 Prepared artifacts for the next remote resume:
 
 - Remote recovery script: `scripts/remote_route6_ft37_recovery.ps1`.
+- Local recovery watcher: `scripts/watch_remote_route6_recovery.ps1`. It polls SSH, then runs `probe -> sync -> start-carla -> eval-ft35-filter`; if the robust-filter eval still misses 1km, it launches `ft37` and records 10-minute monitor snapshots.
 - Resumable gate script: `scripts/run_aux_tail_gate.py`.
 - Robust-filter eval config: `configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml`.
 - Training config: `configs/train_d1_tiny_route6_perception_lane_ft37_fs1_temporal_aux_tail220_bce_sign_2400.yaml`.
@@ -26,7 +27,7 @@ Prepared artifacts for the next remote resume:
   - `configs/eval_d1_route6_perception_lane_keep_ft35_fs1_temporal_aux_tail220_sign_lg120_h0_failure_frames_x6_port2110.yaml`
   - `configs/train_d1_tiny_route6_perception_lane_ft36_fs1_temporal_delta_hardboundary_2200.yaml`
 
-Verification so far: local model/eval tests pass after adding BCE sign loss, temporal delta loss, and perception-lane filtering tests; remote 5090 is temporarily unreachable over SSH despite port `22` accepting TCP.
+Verification so far: local model/eval tests pass after adding BCE sign loss, temporal delta loss, perception-lane filtering tests, and the recovery watcher syntax check. Remote 5090 remains unreachable over SSH from the current Windows route; Sangfor SSL VPN is disconnected, direct WLAN binding times out, and the mihomo path gives a false TCP success followed by SSH disconnect.
 
 ## Latest 1km Goal Update
 

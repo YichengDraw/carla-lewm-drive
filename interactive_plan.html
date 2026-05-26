@@ -193,7 +193,7 @@
         <details open>
           <summary>Phase 1: 车道边界闭环修复</summary>
           <p>目标：让模型在 route6 弯道处从约 200m 提升到至少 300m，再进入 1km 评估。退出条件是 failure-tail sign acc 明显提升，单次 closed-loop 不再在同一车道边界压线。</p>
-          <p>当前动作：远程 SSH 恢复后，先用 <code>configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml</code> 评估 <code>ft35 retry best</code>。如果仍在约 250m lane invasion，就启动 <code>ft37 BCE-sign</code>。如果 ft37 仍失败，再采样 hard-boundary failure frames 进入 <code>ft36 temporal_delta_hardboundary</code> fallback。</p>
+          <p>当前动作：远程 SSH/VPN 恢复后，先用 <code>configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml</code> 评估 <code>ft35 retry best</code>。如果仍在约 250m lane invasion，就启动 <code>ft37 BCE-sign</code>。如果 ft37 仍失败，再采样 hard-boundary failure frames 进入 <code>ft36 temporal_delta_hardboundary</code> fallback。可以用 <code>scripts\watch_remote_route6_recovery.ps1</code> 自动接上恢复后的 eval/train/monitor 链路。</p>
         </details>
         <details open>
           <summary>Phase 2: 1km no-traffic / green-light</summary>
@@ -222,6 +222,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_r
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step eval-ft35-filter
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step train-ft37
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step monitor-ft37</code></pre>
+        <h3>本地恢复看守</h3>
+        <pre><code class="language-powershell">powershell -NoProfile -ExecutionPolicy Bypass -File scripts\watch_remote_route6_recovery.ps1</code></pre>
         <h3>ft35 robust-filter route6 gate</h3>
         <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml \
