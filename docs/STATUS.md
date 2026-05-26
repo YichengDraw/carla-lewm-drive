@@ -17,6 +17,7 @@ Current route6 evidence is now more specific than the older D1 action-policy bra
 
 Prepared artifacts for the next remote resume:
 
+- Remote recovery script: `scripts/remote_route6_ft37_recovery.ps1`.
 - Resumable gate script: `scripts/run_aux_tail_gate.py`.
 - Robust-filter eval config: `configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml`.
 - Training config: `configs/train_d1_tiny_route6_perception_lane_ft37_fs1_temporal_aux_tail220_bce_sign_2400.yaml`.

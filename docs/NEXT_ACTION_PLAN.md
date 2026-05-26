@@ -34,6 +34,7 @@ Active next branch:
 
 Prepared remote-resume tooling:
 
+- Remote recovery script: `scripts/remote_route6_ft37_recovery.ps1`. Use `-Step probe`, `-Step sync`, `-Step start-carla`, `-Step eval-ft35-filter`, `-Step train-ft37`, or `-Step monitor-ft37`.
 - Resumable gate script: `scripts/run_aux_tail_gate.py`. It writes JSON after every checkpoint, so another SSH drop will not erase two hours of diagnostics.
 - Fair robust-filter eval config:
   - `configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml`
@@ -52,6 +53,22 @@ Immediate gate sequence:
 4. If route6 exceeds `300m`, run repeated route6 episodes before the full `1km` gate.
 5. If `ft37` still fails around `250m`, collect new hard-boundary failure frames, convert them with `scripts/eval_frames_to_hdf5.py`, and run the `ft36 hardboundary` fallback.
 6. Only after single-weather no-traffic safety works, run real traffic-light and mixed-weather gates.
+
+Concrete resume commands:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step probe
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step sync
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step start-carla
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step eval-ft35-filter
+```
+
+If the eval still fails near `250m`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step train-ft37
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step monitor-ft37
+```
 
 ## Immediate 2026-05-25 Plan
 

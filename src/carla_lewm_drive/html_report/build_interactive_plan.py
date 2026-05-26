@@ -227,6 +227,13 @@ HTML = r"""<!doctype html>
         <h3>下一轮训练：ft37 BCE-sign</h3>
         <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
   --config configs/train_d1_tiny_route6_perception_lane_ft37_fs1_temporal_aux_tail220_bce_sign_2400.yaml</code></pre>
+        <h3>远端恢复脚本</h3>
+        <pre><code class="language-powershell">powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step probe
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step sync
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step start-carla
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step eval-ft35-filter
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step train-ft37
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step monitor-ft37</code></pre>
         <h3>ft35 robust-filter route6 gate</h3>
         <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
   --config configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml \
