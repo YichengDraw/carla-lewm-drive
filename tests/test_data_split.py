@@ -24,6 +24,7 @@ def test_carla_sequence_dataset_shapes(tmp_path):
         f.create_dataset("ep_offset", data=np.array([0], dtype=np.int32))
         f.create_dataset("pixels", data=np.full((frames, 32, 32, 3), 128, dtype=np.uint8))
         f.create_dataset("action", data=np.zeros((frames, 3), dtype=np.float32))
+        f.create_dataset("teacher_action", data=np.ones((frames, 3), dtype=np.float32))
         f.create_dataset("state", data=np.zeros((frames, 6), dtype=np.float32))
         f.create_dataset("proprio", data=np.zeros((frames, 3), dtype=np.float32))
         f.create_dataset("ep_idx", data=np.zeros(frames, dtype=np.int32))
@@ -33,6 +34,11 @@ def test_carla_sequence_dataset_shapes(tmp_path):
     item = ds[0]
     assert item["pixels"].shape == (4, 3, 32, 32)
     assert item["action"].shape == (4, 6)
+    assert item["teacher_action"].shape == (4, 6)
+    assert item["teacher_action_mask"].shape == (4, 1)
+    assert torch.all(item["action"] == 0.0)
+    assert torch.all(item["teacher_action"] == 1.0)
+    assert torch.all(item["teacher_action_mask"] == 1.0)
     assert item["route_id"].shape == (4, 1)
     assert item["route_id"].dtype == torch.long
     assert item["route_id"].squeeze(-1).tolist() == [10, 10, 10, 10]
@@ -73,3 +79,20 @@ def test_build_splits_supports_repeated_multi_dataset_training(tmp_path):
     assert len(train.datasets) == 4
     assert len(val.datasets) == 2
     assert len(test.datasets) == 2
+
+
+def test_carla_sequence_dataset_returns_zero_teacher_mask_without_teacher_action(tmp_path):
+    path = tmp_path / "tiny_no_teacher.h5"
+    frames = 16
+    with h5py.File(path, "w") as f:
+        f.create_dataset("ep_len", data=np.array([frames], dtype=np.int32))
+        f.create_dataset("ep_offset", data=np.array([0], dtype=np.int32))
+        f.create_dataset("pixels", data=np.full((frames, 32, 32, 3), 128, dtype=np.uint8))
+        f.create_dataset("action", data=np.zeros((frames, 3), dtype=np.float32))
+        f.create_dataset("ep_idx", data=np.zeros(frames, dtype=np.int32))
+        f.create_dataset("step_idx", data=np.arange(frames, dtype=np.int32))
+
+    item = CarlaSequenceDataset(path, frameskip=2, history_size=3, num_preds=1, image_size=32)[0]
+
+    assert torch.all(item["teacher_action"] == item["action"])
+    assert torch.all(item["teacher_action_mask"] == 0.0)

@@ -1,0 +1,11 @@
+data:
+  dataset_paths:
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft33_tail190_retry_lg120_h0_failure_tail220_lane_teacher_x4.h5
+  frameskip: 1
+  history_size: 3
+  num_preds: 1
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  split_seed: 20260012
+  image_size: 224

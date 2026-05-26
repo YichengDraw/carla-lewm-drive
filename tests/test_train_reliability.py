@@ -71,6 +71,80 @@ def test_append_metrics_expands_namespaced_headers(tmp_path):
     assert "test,1,,,0.25" in text[3]
 
 
+def test_init_model_from_checkpoint_loads_weights_and_records_source(tmp_path):
+    model = torch.nn.Linear(1, 1)
+    checkpoint_path = tmp_path / "source.pt"
+    torch.save(
+        {
+            "model": {"weight": torch.tensor([[3.0]]), "bias": torch.tensor([2.0])},
+            "epoch": 4,
+            "global_step": 2080,
+        },
+        checkpoint_path,
+    )
+
+    train_module.init_model_from_checkpoint(model, checkpoint_path, tmp_path)
+    report = json.loads((tmp_path / "init_checkpoint.json").read_text(encoding="utf-8"))
+
+    assert float(model.weight.item()) == 3.0
+    assert float(model.bias.item()) == 2.0
+    assert report["init_checkpoint_path"] == str(checkpoint_path)
+    assert report["source_epoch"] == 4
+    assert report["source_global_step"] == 2080
+
+
+def test_init_model_from_checkpoint_can_zero_new_route_embedding(tmp_path):
+    class RouteModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor([0.0]))
+            self.route_embed = torch.nn.Embedding(4, 1)
+
+    model = RouteModel()
+    checkpoint_path = tmp_path / "source.pt"
+    torch.save({"model": {"weight": torch.tensor([5.0])}}, checkpoint_path)
+
+    train_module.init_model_from_checkpoint(
+        model,
+        checkpoint_path,
+        tmp_path,
+        strict=False,
+        zero_missing_route_embed=True,
+    )
+    report = json.loads((tmp_path / "init_checkpoint.json").read_text(encoding="utf-8"))
+
+    assert float(model.weight.item()) == 5.0
+    assert torch.all(model.route_embed.weight == 0.0)
+    assert report["strict"] is False
+    assert report["missing_keys"] == ["route_embed.weight"]
+    assert report["zero_missing_route_embed"] is True
+
+
+def test_init_model_from_checkpoint_skips_shape_mismatch_when_not_strict(tmp_path):
+    model = torch.nn.Linear(2, 1)
+    original_weight = model.weight.detach().clone()
+    checkpoint_path = tmp_path / "source.pt"
+    torch.save(
+        {
+            "model": {
+                "weight": torch.ones(3, 1),
+                "bias": torch.tensor([4.0]),
+            }
+        },
+        checkpoint_path,
+    )
+
+    train_module.init_model_from_checkpoint(model, checkpoint_path, tmp_path, strict=False)
+    report = json.loads((tmp_path / "init_checkpoint.json").read_text(encoding="utf-8"))
+
+    assert torch.allclose(model.weight, original_weight)
+    assert float(model.bias.item()) == 4.0
+    assert report["missing_keys"] == ["weight"]
+    assert report["skipped_shape_keys"] == [
+        {"key": "weight", "checkpoint_shape": [3, 1], "model_shape": [1, 2]}
+    ]
+
+
 def test_batch_probe_uses_autocast_and_cleans_each_tier(monkeypatch, tmp_path):
     cfg = base_cfg(tmp_path)
     autocast_calls = []

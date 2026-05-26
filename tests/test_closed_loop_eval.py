@@ -8,7 +8,9 @@ import torch
 from carla_lewm_drive.closed_loop_eval.evaluate import (
     CEMPlanner,
     apply_cli_overrides,
+    apply_red_light_stop,
     expand_action_to_model_dim,
+    filter_perception_lane_state,
     flatten_model_action_to_block,
     lane_keep_action,
     lane_keep_steer,
@@ -16,9 +18,12 @@ from carla_lewm_drive.closed_loop_eval.evaluate import (
     maybe_govern_model_speed,
     normalize_policy,
     requires_model,
+    red_light_monitor_enabled,
     resolve_policy,
     run_dry_eval,
     runtime_eval_config,
+    smooth_model_action_block,
+    update_red_light_violation,
     write_action_trace,
     write_metrics,
 )
@@ -95,6 +100,32 @@ def test_flatten_model_action_to_block_recovers_frameskip_controls():
     assert block[0].tolist() == pytest.approx([0.0, 1.0, 1.0])
     assert block[1].tolist() == pytest.approx([0.2, -0.5, 0.0])
     assert block[-1].tolist() == pytest.approx([1.0, -1.0, 0.8])
+
+
+def test_smooth_model_action_block_uses_block_mean_ema_and_rate_limit():
+    block = np.array(
+        [
+            [0.3, 0.10, 0.0],
+            [0.3, -0.02, 0.0],
+            [0.3, 0.04, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    eval_cfg = {
+        "model_action_smoothing": {
+            "block_steer_mode": "mean",
+            "ema_alpha": 0.5,
+            "steer_rate_limit": 0.01,
+            "steer_scale": 0.6,
+        }
+    }
+
+    smoothed, last_steer = smooth_model_action_block(block, previous_steer=0.0, eval_cfg=eval_cfg)
+
+    assert smoothed[:, 0].tolist() == pytest.approx([0.3, 0.3, 0.3])
+    assert smoothed[:, 2].tolist() == pytest.approx([0.0, 0.0, 0.0])
+    assert smoothed[:, 1].tolist() == pytest.approx([0.01, 0.017, 0.0205])
+    assert last_steer == pytest.approx(0.0205)
 
 
 def test_cem_score_samples_keeps_history_action_dim_frameskip_times_three():
@@ -174,6 +205,137 @@ def test_lane_keep_action_uses_speed_control_and_brake_when_overspeeding():
     assert slow.tolist() == pytest.approx([0.55, 0.0, 0.0])
     assert fast[0] == pytest.approx(0.0)
     assert fast[2] > 0.0
+
+
+def test_apply_red_light_stop_only_brakes_when_enabled_and_red():
+    action = np.array([0.3, -0.04, 0.0], dtype=np.float32)
+
+    unchanged = apply_red_light_stop(action, red_light_active=True, eval_cfg={"red_light_stop": False})
+    stopped = apply_red_light_stop(
+        action,
+        red_light_active=True,
+        eval_cfg={"red_light_stop": True, "red_light_stop_brake": 0.7},
+    )
+
+    assert unchanged.tolist() == pytest.approx([0.3, -0.04, 0.0])
+    assert stopped.tolist() == pytest.approx([0.0, -0.04, 0.7])
+
+
+def test_red_light_monitor_defaults_off_for_force_green_lane_experiments():
+    assert red_light_monitor_enabled({"force_green_lights": True}) is False
+    assert red_light_monitor_enabled({"force_green_lights": False}) is True
+    assert red_light_monitor_enabled({"force_green_lights": True, "monitor_red_lights": True}) is True
+
+
+def test_red_light_violation_requires_active_red_signal_even_with_zero_grace():
+    seconds, active = update_red_light_violation(
+        red_signal_active=False,
+        speed_mps=4.0,
+        previous_seconds=0.0,
+        fixed_delta_seconds=0.05,
+        eval_cfg={"red_light_grace_seconds": 0.0},
+    )
+
+    assert seconds == pytest.approx(0.0)
+    assert active is False
+
+
+def test_red_light_violation_honors_grace_seconds():
+    cfg = {"red_light_speed_threshold_mps": 0.2, "red_light_grace_seconds": 0.15}
+
+    seconds, active = update_red_light_violation(
+        red_signal_active=True,
+        speed_mps=4.0,
+        previous_seconds=0.0,
+        fixed_delta_seconds=0.05,
+        eval_cfg=cfg,
+    )
+    assert seconds == pytest.approx(0.05)
+    assert active is False
+
+    seconds, active = update_red_light_violation(
+        red_signal_active=True,
+        speed_mps=4.0,
+        previous_seconds=0.10,
+        fixed_delta_seconds=0.05,
+        eval_cfg=cfg,
+    )
+    assert seconds == pytest.approx(0.15)
+    assert active is True
+
+
+def test_perception_lane_filter_disabled_returns_raw_values():
+    state = (0.3, 0.1)
+
+    lane, heading, next_state, active = filter_perception_lane_state(
+        lane_offset_m=-0.2,
+        heading_error_rad=-0.03,
+        previous_state=state,
+        eval_cfg={},
+    )
+
+    assert lane == pytest.approx(-0.2)
+    assert heading == pytest.approx(-0.03)
+    assert next_state == state
+    assert active is False
+
+
+def test_perception_lane_filter_holds_small_reverse_flip():
+    eval_cfg = {
+        "perception_lane_filter": {
+            "enabled": True,
+            "alpha": 0.25,
+            "heading_alpha": 0.5,
+            "small_flip_abs": 0.08,
+            "flip_decay": 0.9,
+        }
+    }
+
+    lane, heading, state, active = filter_perception_lane_state(0.30, 0.02, None, eval_cfg)
+    assert lane == pytest.approx(0.30)
+    assert heading == pytest.approx(0.02)
+    assert active is False
+
+    lane, heading, state, active = filter_perception_lane_state(-0.02, -0.02, state, eval_cfg)
+    assert lane == pytest.approx(0.27)
+    assert heading == pytest.approx(0.00)
+    assert state == pytest.approx((0.27, 0.00))
+    assert active is True
+
+
+def test_perception_lane_filter_holds_configured_medium_reverse_flip():
+    eval_cfg = {
+        "perception_lane_filter": {
+            "enabled": True,
+            "alpha": 0.25,
+            "small_flip_abs": 0.08,
+            "max_flip_abs": 0.30,
+            "flip_decay": 0.9,
+        }
+    }
+
+    lane, _heading, state, active = filter_perception_lane_state(-0.22, 0.0, (0.31, 0.0), eval_cfg)
+
+    assert lane == pytest.approx(0.279)
+    assert state[0] == pytest.approx(0.279)
+    assert active is True
+
+
+def test_perception_lane_filter_blends_same_sign_values():
+    eval_cfg = {
+        "perception_lane_filter": {
+            "enabled": True,
+            "alpha": 0.25,
+            "heading_alpha": 0.25,
+        }
+    }
+
+    lane, heading, state, active = filter_perception_lane_state(0.40, 0.04, (0.20, 0.00), eval_cfg)
+
+    assert lane == pytest.approx(0.25)
+    assert heading == pytest.approx(0.01)
+    assert state == pytest.approx((0.25, 0.01))
+    assert active is True
 
 
 def test_runtime_eval_config_merges_top_level_lane_keep():
@@ -329,8 +491,12 @@ def test_lane_keep_policy_dry_run_does_not_require_checkpoint(tmp_path):
 def test_model_action_policy_normalizes_to_model_backed_action():
     assert normalize_policy("action") == "model_action"
     assert normalize_policy("model_action_lane_keep") == "model_action_lane_keep"
+    assert normalize_policy("model_steer_speed_keep") == "model_action_steer_speed_keep"
+    assert normalize_policy("model_steer_speed_keep_smooth") == "model_action_steer_speed_keep_smooth"
     assert normalize_policy("perception_lane_keep") == "model_perception_lane_keep"
     assert normalize_policy("rollout_lane_keep") == "model_rollout_lane_keep"
+    assert requires_model("model_action_steer_speed_keep") is True
+    assert requires_model("model_action_steer_speed_keep_smooth") is True
     assert requires_model("model_rollout_lane_keep") is True
 
 
@@ -417,6 +583,77 @@ def test_load_model_preserves_temporal_action_head_config(tmp_path, monkeypatch)
     assert loaded.cfg.temporal_action_history_noise_std == pytest.approx((0.03, 0.06, 0.02))
     assert loaded.cfg.temporal_action_history_noise_prob == pytest.approx(0.5)
     assert loaded.action_head[0].normalized_shape == (21,)
+
+
+def test_load_model_preserves_patch_lane_head_config(tmp_path, monkeypatch):
+    class DummyEncoder(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            values = torch.arange(batch * 12, dtype=pixels.dtype, device=pixels.device).reshape(batch, 3, 4)
+            return SimpleNamespace(last_hidden_state=values)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    payload_cfg = {
+        "data": {"frameskip": 1, "history_size": 2, "image_size": 8},
+        "model": {
+            "encoder_scale": "tiny",
+            "encoder_pooling": "mean_patch",
+            "patch_size": 4,
+            "embed_dim": 4,
+            "predictor_depth": 1,
+            "predictor_heads": 1,
+            "predictor_mlp_dim": 8,
+            "dropout": 0.1,
+            "pred_weight": 0.0,
+            "sigreg_weight": 0.0,
+            "use_aux_head": True,
+            "aux_weight": 1.0,
+            "pred_aux_weight": 0.0,
+            "aux_component_weights": [0.0, 0.0, 512.0, 64.0, 0.0, 0.0, 0.0, 0.0],
+            "aux_lane_patch_mode": "residual",
+            "aux_lane_patch_pooling": "mean",
+            "aux_lane_patch_hidden_dim": 6,
+            "aux_lane_patch_dropout": 0.0,
+            "aux_lane_patch_zero_init": True,
+        },
+    }
+    model = DrivingLeWM(
+        DrivingLeWMConfig(
+            image_size=8,
+            patch_size=4,
+            action_dim=3,
+            embed_dim=4,
+            history_size=2,
+            predictor_depth=1,
+            predictor_heads=1,
+            predictor_mlp_dim=8,
+            encoder_pooling="mean_patch",
+            use_aux_head=True,
+            pred_weight=0.0,
+            sigreg_weight=0.0,
+            aux_weight=1.0,
+            pred_aux_weight=0.0,
+            aux_component_weights=(0.0, 0.0, 512.0, 64.0, 0.0, 0.0, 0.0, 0.0),
+            aux_lane_patch_mode="residual",
+            aux_lane_patch_pooling="mean",
+            aux_lane_patch_hidden_dim=6,
+            aux_lane_patch_dropout=0.0,
+            aux_lane_patch_zero_init=True,
+        )
+    )
+    checkpoint = tmp_path / "patch_lane.pt"
+    torch.save({"cfg": payload_cfg, "model": model.state_dict()}, checkpoint)
+
+    loaded = load_model(checkpoint)
+
+    assert loaded.cfg.aux_lane_patch_mode == "residual"
+    assert loaded.cfg.aux_lane_patch_pooling == "mean"
+    assert loaded.cfg.aux_lane_patch_hidden_dim == 6
+    assert loaded.aux_lane_patch_head is not None
 
 
 def test_apply_cli_overrides_supports_short_eval_knobs(tmp_path):

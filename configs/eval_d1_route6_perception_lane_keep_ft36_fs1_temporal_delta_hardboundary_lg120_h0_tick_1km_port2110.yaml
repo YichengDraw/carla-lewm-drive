@@ -1,0 +1,70 @@
+eval:
+  label: d1_route6_perception_lane_keep_ft36_temporal_delta_hardboundary_lg120_h0_tick_1km_port2110
+  policy: model_perception_lane_keep
+  dataset_path: data/d1_city_free_drive_long_recovery/carla_d1_city_free_drive_long_recovery_fast.h5
+  checkpoint_path: outputs/d1_tiny_h1_fs1_route6_perception_lane_ft36_temporal_delta_hardboundary_2200/best.pt
+  output_dir: outputs/d1_eval_perception_lane_keep_ft36_temporal_delta_hardboundary_lg120_h0_tick_route6_1km_port2110
+  host: 127.0.0.1
+  port: 2110
+  timeout_s: 30.0
+  town: Town03
+  load_world: true
+  fixed_delta_seconds: 0.05
+  traffic_manager_port: 8110
+  traffic_manager_seed: 20260606
+  weather: ClearNoon
+  force_green_lights: true
+  monitor_red_lights: false
+  route_spawn_indices: [6]
+  route_cap_m: 1000.0
+  target_speed_kmh: 12.6
+  max_episode_seconds: 520.0
+  eval_episodes: 1
+  blocked_speed_mps: 0.1
+  blocked_seconds: 5.0
+  blocked_grace_seconds: 8.0
+  max_sim_delta_multiplier: 2.5
+  red_light_speed_threshold_mps: 0.2
+  speed_limit_kmh: 35.0
+  speed_limit_seconds: 2.0
+  speed_limit_as_infraction: false
+  stop_on_collision: true
+  stop_on_offroad: true
+  stop_on_lane_invasion: true
+  stop_on_red_light: false
+  stop_on_blocked: true
+  stop_on_speed_limit: false
+  save_contact_sheet: true
+  contact_sheet_every: 120
+  max_contact_sheet_frames: 100
+  save_frames: false
+  save_action_trace: true
+  exclusive_throttle_brake: true
+  model_warmup_action: [0.30, 0.0, 0.0]
+  perception_lane_keep_use_true_speed: true
+  perception_control_frameskip: 1
+
+camera:
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+lane_keep:
+  target_speed_mps: 3.5
+  throttle: 0.26
+  speed_kp: 0.05
+  throttle_min: 0.08
+  throttle_max: 0.42
+  overspeed_margin_mps: 1.0
+  brake_kp: 0.10
+  steer_limit: 0.35
+  steer_bias: 0.0
+  lane_offset_gain: 1.20
+  heading_error_gain: 0.0

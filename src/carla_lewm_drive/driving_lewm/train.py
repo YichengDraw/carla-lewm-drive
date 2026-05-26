@@ -171,6 +171,52 @@ def make_model_cfg(cfg: dict[str, Any], action_dim: int) -> DrivingLeWMConfig:
     return DrivingLeWMConfig(**model)
 
 
+def init_model_from_checkpoint(
+    model: DrivingLeWM,
+    checkpoint_path: str | Path | None,
+    output_dir: Path,
+    *,
+    strict: bool = True,
+    zero_missing_route_embed: bool = False,
+) -> None:
+    if checkpoint_path in (None, ""):
+        return
+    path = Path(checkpoint_path)
+    checkpoint = torch.load(path, map_location="cpu")
+    state = checkpoint["model"] if isinstance(checkpoint, dict) and "model" in checkpoint else checkpoint
+    if zero_missing_route_embed and getattr(model, "route_embed", None) is not None:
+        torch.nn.init.zeros_(model.route_embed.weight)
+    skipped_shape_keys: list[dict[str, Any]] = []
+    if not strict:
+        model_state = model.state_dict()
+        filtered_state = {}
+        for key, value in state.items():
+            target = model_state.get(key)
+            if target is not None and hasattr(value, "shape") and tuple(target.shape) != tuple(value.shape):
+                skipped_shape_keys.append(
+                    {
+                        "key": key,
+                        "checkpoint_shape": list(value.shape),
+                        "model_shape": list(target.shape),
+                    }
+                )
+                continue
+            filtered_state[key] = value
+        state = filtered_state
+    incompatible = model.load_state_dict(state, strict=strict)
+    payload = {
+        "init_checkpoint_path": str(path),
+        "strict": bool(strict),
+        "missing_keys": list(getattr(incompatible, "missing_keys", [])),
+        "unexpected_keys": list(getattr(incompatible, "unexpected_keys", [])),
+        "skipped_shape_keys": skipped_shape_keys,
+        "source_epoch": checkpoint.get("epoch") if isinstance(checkpoint, dict) else None,
+        "source_global_step": checkpoint.get("global_step") if isinstance(checkpoint, dict) else None,
+        "zero_missing_route_embed": bool(zero_missing_route_embed),
+    }
+    (output_dir / "init_checkpoint.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def configured_dataset_paths(data_cfg: dict[str, Any]) -> str | list[str] | None:
     if data_cfg.get("dataset_paths") is not None:
         return [str(path) for path in data_cfg["dataset_paths"]]
@@ -258,6 +304,14 @@ def train(cfg: dict[str, Any], *, no_wandb: bool = False) -> Path:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     first_batch = next(iter(train_loader))
     model = DrivingLeWM(make_model_cfg(cfg, first_batch["action"].shape[-1])).to(device)
+    run_cfg = cfg.get("run", {})
+    init_model_from_checkpoint(
+        model,
+        run_cfg.get("init_checkpoint_path"),
+        output_dir,
+        strict=bool(run_cfg.get("init_checkpoint_strict", True)),
+        zero_missing_route_embed=bool(run_cfg.get("zero_missing_route_embed", False)),
+    )
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(cfg["optimizer"]["lr"]),

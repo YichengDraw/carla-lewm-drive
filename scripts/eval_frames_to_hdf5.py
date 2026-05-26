@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
             "aligned as current frame -> next simulator tick."
         ),
     )
+    parser.add_argument(
+        "--store-teacher-action",
+        action="store_true",
+        help="Also store same-frame lane-keep teacher actions in teacher_action without replacing the transition action.",
+    )
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
@@ -54,12 +59,19 @@ def row_applied_action(row: dict[str, str]) -> np.ndarray:
         raise KeyError(f"Trace row is missing {missing!r}; applied action source requires throttle, steer, and brake") from exc
 
 
-def convert(eval_dir: Path, eval_cfg: dict[str, Any], *, action_source: str = "teacher") -> dict[str, Any]:
+def convert(
+    eval_dir: Path,
+    eval_cfg: dict[str, Any],
+    *,
+    action_source: str = "teacher",
+    store_teacher_action: bool = False,
+) -> dict[str, Any]:
     if action_source not in {"teacher", "applied"}:
         raise ValueError(f"Unknown action_source {action_source!r}; expected 'teacher' or 'applied'")
 
     pixels: list[np.ndarray] = []
     actions: list[np.ndarray] = []
+    teacher_actions: list[np.ndarray] = []
     state: list[np.ndarray] = []
     proprio: list[np.ndarray] = []
     speed: list[float] = []
@@ -89,8 +101,9 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any], *, action_source: str = "t
             speed_mps = float(row["speed_mps"])
             lane_offset = float(row["lane_offset_m"])
             heading_error = float(row["heading_error_rad"])
+            teacher_action = lane_keep_action(lane_offset, heading_error, speed_mps, eval_cfg)
             if action_source == "teacher":
-                action = lane_keep_action(lane_offset, heading_error, speed_mps, eval_cfg)
+                action = teacher_action
             else:
                 if row_idx + 1 >= len(rows):
                     continue
@@ -102,6 +115,8 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any], *, action_source: str = "t
 
             pixels.append(rgb)
             actions.append(action.astype(np.float32))
+            if store_teacher_action:
+                teacher_actions.append(teacher_action.astype(np.float32))
             state.append(np.asarray([0.0, 0.0, 0.0, speed_mps, float(row["route_progress_m"]), lane_offset], dtype=np.float32))
             proprio.append(np.asarray([speed_mps, lane_offset, heading_error], dtype=np.float32))
             speed.append(speed_mps)
@@ -123,7 +138,7 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any], *, action_source: str = "t
         raise ValueError(f"No saved frames found under {eval_dir}")
 
     ep_offset = np.cumsum([0, *ep_len[:-1]], dtype=np.int64)
-    return {
+    data = {
         "pixels": np.asarray(pixels, dtype=np.uint8),
         "action": np.asarray(actions, dtype=np.float32),
         "state": np.asarray(state, dtype=np.float32),
@@ -146,6 +161,9 @@ def convert(eval_dir: Path, eval_cfg: dict[str, Any], *, action_source: str = "t
         "ep_len": np.asarray(ep_len, dtype=np.int32),
         "ep_offset": ep_offset.astype(np.int32),
     }
+    if store_teacher_action:
+        data["teacher_action"] = np.asarray(teacher_actions, dtype=np.float32)
+    return data
 
 
 def action_alignment(action_source: str) -> str:
@@ -166,17 +184,25 @@ def write_hdf5(data: dict[str, np.ndarray], path: Path, *, overwrite: bool, acti
         f.attrs["format"] = "carla_lewm_drive_eval_dagger_v1"
         f.attrs["action_source"] = action_source
         f.attrs["action_alignment"] = action_alignment(action_source)
+        if "teacher_action" in data:
+            f.attrs["teacher_action_alignment"] = "same_frame_teacher"
 
 
 def main() -> None:
     args = parse_args()
     cfg = runtime_eval_config(load_yaml(args.eval_config))
-    data = convert(args.eval_dir, cfg, action_source=args.action_source)
+    data = convert(
+        args.eval_dir,
+        cfg,
+        action_source=args.action_source,
+        store_teacher_action=args.store_teacher_action,
+    )
     write_hdf5(data, args.output, overwrite=args.overwrite, action_source=args.action_source)
     report = {
         "output": str(args.output),
         "action_source": args.action_source,
         "action_alignment": action_alignment(args.action_source),
+        "has_teacher_action": "teacher_action" in data,
         "frames": int(data["pixels"].shape[0]),
         "episodes": int(data["ep_len"].shape[0]),
         "lane_offset_abs_gt_0p5": float(np.mean(np.abs(data["lane_offset_m"]) > 0.5)),

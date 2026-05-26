@@ -1,6 +1,31 @@
 # Current Execution Status
 
-Last checked: 2026-05-25 11:40 Asia/Shanghai.
+Last checked: 2026-05-26 18:20 Asia/Shanghai.
+
+## 2026-05-26 Route6 Safety Snapshot
+
+The active stop condition is unchanged: continue exploration until a learned model can drive at least `1km` on the simplified CARLA city task without lane invasion, roadside/off-road failure, collision, blocked failure, or traffic-light violation. This condition is not met.
+
+Current route6 evidence is now more specific than the older D1 action-policy branch:
+
+- The simplified Town03/no-traffic/green-light route6 task is feasible with the deterministic oracle `lane_keep` controller.
+- The best learned route6 result remains below the target: `ft33 tail190 retry` reached `265.03m` before `lane_invasion`, with no collision/offroad/red-light/blocked failure.
+- `ft34 tail220 laneonly` regressed to `248.81m` before `lane_invasion`.
+- `ft35 temporal_aux + lane/heading sign` trained cleanly with W&B online. Best checkpoint was epoch `7`, step `1260`, with `best val/loss=0.919829`; final validation rose to `0.968075` at step `1800`, so `best.pt` is the main candidate.
+- `ft35 retry` did not solve closed-loop route6: best checkpoint reached `249.80m`, last checkpoint reached `249.90m`, both terminating by `lane_invasion` with collision/offroad/red-light/blocked counts at `0`.
+- The next implementation branch is `ft37 BCE-sign`: keep the same tiny patch-lane/perception architecture and aux vector, but change lane/heading sign supervision from margin loss to BCE on scalar lane/heading outputs. Before training it, run a fair robust-filter eval on `ft35 best` to check whether the remaining error is mostly output sign jitter.
+
+Prepared artifacts for the next remote resume:
+
+- Resumable gate script: `scripts/run_aux_tail_gate.py`.
+- Robust-filter eval config: `configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml`.
+- Training config: `configs/train_d1_tiny_route6_perception_lane_ft37_fs1_temporal_aux_tail220_bce_sign_2400.yaml`.
+- Hard-boundary fallback configs remain available if BCE-sign fails:
+  - `configs/eval_d1_route6_perception_lane_keep_ft35_fs1_temporal_aux_tail220_sign_lg080_hg060_failure_frames_x6_port2110.yaml`
+  - `configs/eval_d1_route6_perception_lane_keep_ft35_fs1_temporal_aux_tail220_sign_lg120_h0_failure_frames_x6_port2110.yaml`
+  - `configs/train_d1_tiny_route6_perception_lane_ft36_fs1_temporal_delta_hardboundary_2200.yaml`
+
+Verification so far: local model/eval tests pass after adding BCE sign loss, temporal delta loss, and perception-lane filtering tests; remote 5090 is temporarily unreachable over SSH despite port `22` accepting TCP.
 
 ## Latest 1km Goal Update
 

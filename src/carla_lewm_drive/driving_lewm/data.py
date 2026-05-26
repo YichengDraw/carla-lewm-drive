@@ -133,6 +133,13 @@ class CarlaSequenceDataset(Dataset):
 
         actions = np.asarray(h5["action"][raw_indices], dtype=np.float32)
         action = torch.from_numpy(actions.reshape(self.num_steps, self.frameskip * self.action_dim))
+        if "teacher_action" in h5:
+            teacher_actions = np.asarray(h5["teacher_action"][raw_indices], dtype=np.float32)
+            teacher_action = torch.from_numpy(teacher_actions.reshape(self.num_steps, self.frameskip * self.action_dim))
+            teacher_action_mask = torch.ones((self.num_steps, 1), dtype=torch.float32)
+        else:
+            teacher_action = action.clone()
+            teacher_action_mask = torch.zeros((self.num_steps, 1), dtype=torch.float32)
 
         aux = {
             "speed_mps": self._load_optional(h5, "speed_mps", frame_indices),
@@ -145,13 +152,16 @@ class CarlaSequenceDataset(Dataset):
             "blocked": self._load_optional(h5, "blocked", frame_indices),
             "route_id": self._load_optional_int(h5, "route_id", frame_indices),
         }
-        return {
+        item = {
             "pixels": pixels,
             "action": action,
+            "teacher_action": teacher_action,
+            "teacher_action_mask": teacher_action_mask,
             "episode": torch.tensor(ep, dtype=torch.long),
             "start_step": torch.tensor(start, dtype=torch.long),
             **aux,
         }
+        return item
 
 
 def _make_single_splits(dataset_path: str | Path, cfg: dict, *, split_seed: int) -> tuple[Subset, Subset, Subset, EpisodeSplit]:

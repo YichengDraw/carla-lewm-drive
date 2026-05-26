@@ -1,0 +1,133 @@
+run:
+  name: d1_tiny_h1_fs1_route6_perception_lane_ft36_temporal_delta_hardboundary_2200
+  seed: 5236
+  output_dir: outputs/d1_tiny_h1_fs1_route6_perception_lane_ft36_temporal_delta_hardboundary_2200
+  init_checkpoint_path: outputs/d1_tiny_h1_fs1_route6_perception_lane_ft35_temporal_aux_tail220_sign_1800_retry/best.pt
+  init_checkpoint_strict: true
+
+data:
+  dataset_paths:
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_autopilot_route6_1km_lane_teacher_chunk450.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_wide_recovery_route6_lane_teacher.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_recovery_active_route6_lane_teacher.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_long_recovery_route6_lane_teacher_chunk400.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_route6_ft13_failure_lane_teacher_chunk100.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft19_route6_failure_lane_teacher.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft21_perception_failure_lane_teacher_x3.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft22_perception_failure_lane_teacher_x6.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft23_perception_failure_lane_teacher_x3.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft23_tick_perception_failure_lane_teacher_x3.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft27_fs1_tick_perception_failure_lane_teacher_x3.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft28_fs1_tick_perception_failure_lane_teacher_x3dup.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft29_fs1_tick_perception_failure_lane_teacher_x3.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft30_fs1_patchlane_failure_lane_teacher_x6.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft30_fs1_patchlane_failure_tail150_lane_teacher_x6.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft31_fs1_patchlane_tail150_failure_lane_teacher_x6.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft31_fs1_patchlane_tail150_failure_tail180_lane_teacher_x6.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft32_fs1_patchlane_tail180_best_lg080_hg060_failure_lane_teacher_x5.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft32_fs1_patchlane_tail180_best_lg080_hg060_failure_tail190_lane_teacher_x5.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft33_tail190_retry_lg120_h0_failure_lane_teacher_x4.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft33_tail190_retry_lg120_h0_failure_tail220_lane_teacher_x4.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft35_temporal_aux_lg080_hg060_failure_lane_teacher_x6.h5
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft35_temporal_aux_lg120_h0_failure_lane_teacher_x6.h5
+  dataset_repeat_factors: [2, 18, 10, 1, 6, 12, 70, 45, 60, 75, 130, 220, 260, 180, 1000, 220, 1800, 220, 2200, 220, 2600, 3200, 3200]
+  frameskip: 1
+  history_size: 3
+  num_preds: 1
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  split_seed: 20260014
+  image_size: 224
+
+model:
+  encoder_scale: tiny
+  encoder_pooling: cls_mean
+  patch_size: 14
+  embed_dim: 192
+  predictor_depth: 6
+  predictor_heads: 6
+  predictor_mlp_dim: 768
+  dropout: 0.1
+  pred_weight: 0.0
+  sigreg_weight: 0.0
+  use_aux_head: true
+  aux_weight: 1.0
+  pred_aux_weight: 0.0
+  aux_component_weights: [0.0, 0.0, 1280.0, 128.0, 0.0, 0.0, 0.0, 0.0]
+  aux_control_weight: 10.0
+  pred_aux_control_weight: 0.0
+  aux_control_sign_weight: 48.0
+  aux_control_active_threshold: 0.005
+  aux_control_sign_balance: true
+  aux_control_lane_gain: 1.20
+  aux_control_heading_gain: 0.0
+  aux_control_steer_limit: 0.35
+  aux_lane_edge_threshold: 0.15
+  aux_lane_edge_weight: 60.0
+  aux_lane_underamp_weight: 20.0
+  pred_aux_lane_underamp_weight: 0.0
+  aux_lane_underamp_threshold: 0.10
+  aux_lane_underamp_margin: 1.15
+  aux_lane_underamp_balance_signs: true
+  use_temporal_aux_head: true
+  temporal_aux_hidden_dim: 256
+  temporal_aux_dropout: 0.05
+  temporal_aux_zero_init: false
+  aux_lane_sign_weight: 12.0
+  pred_aux_lane_sign_weight: 0.0
+  aux_lane_sign_threshold: 0.10
+  aux_lane_sign_balance: true
+  aux_heading_sign_weight: 4.0
+  pred_aux_heading_sign_weight: 0.0
+  aux_heading_sign_threshold: 0.03
+  aux_heading_sign_balance: true
+  aux_temporal_delta_weight: 6.0
+  aux_temporal_delta_lane_weight: 4.0
+  aux_temporal_delta_heading_weight: 1.0
+  aux_temporal_delta_active_lane_threshold: 0.10
+  aux_lane_patch_mode: residual
+  aux_lane_patch_pooling: attention
+  aux_lane_patch_hidden_dim: 192
+  aux_lane_patch_dropout: 0.1
+  aux_lane_patch_zero_init: false
+  action_weight: 0.0
+  pred_action_weight: 0.0
+  action_component_weights: [0.05, 90.0, 0.05]
+  action_active_steer_weight: 16.0
+  action_active_steer_threshold: 0.015
+  action_conflict_weight: 0.0
+  pred_action_conflict_weight: 0.0
+  progress_mode: delta
+  route_vocab_size: 0
+  route_embed_scale: 0.0
+  use_temporal_action_head: false
+  temporal_action_include_history_actions: true
+
+optimizer:
+  lr: 8.0e-7
+  weight_decay: 1.0e-3
+
+trainer:
+  max_epochs: 30
+  max_steps: 2200
+  batch_size: 256
+  num_workers: 4
+  precision: bf16
+  gradient_clip_norm: 1.0
+  log_every_steps: 25
+  eval_every_epochs: 1
+  limit_train_batches: 220
+  save_eval_checkpoints: true
+  early_stop_patience_evals: 5
+  early_stop_min_steps: 880
+  early_stop_min_delta: 0.0
+  batch_probe_order: [256, 192, 128, 96, 64]
+
+wandb:
+  enabled: true
+  entity: yicheng132024-southern-university-of-science-technology
+  project: carla-lewm-drive
+  group: d1-route6-perception-lane-ft36-temporal-delta-hardboundary
+  resume: never
+  mode: online

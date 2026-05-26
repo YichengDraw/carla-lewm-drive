@@ -78,6 +78,17 @@ def test_convert_can_use_applied_trace_actions(tmp_path):
     assert data["action"][0].tolist() == pytest.approx([0.44, -0.55, 0.66])
 
 
+def test_convert_applied_can_store_teacher_action_target(tmp_path):
+    write_eval_trace(tmp_path)
+
+    data = convert(tmp_path, eval_cfg(), action_source="applied", store_teacher_action=True)
+
+    assert data["action"].shape[0] == 1
+    assert data["action"][0].tolist() == pytest.approx([0.44, -0.55, 0.66])
+    assert data["teacher_action"][0, 1] == pytest.approx(-0.2)
+    assert data["teacher_action"][0].tolist() != pytest.approx(data["action"][0].tolist())
+
+
 def test_convert_teacher_action_keeps_lane_keep_label(tmp_path):
     write_eval_trace(tmp_path)
 
@@ -90,7 +101,7 @@ def test_convert_teacher_action_keeps_lane_keep_label(tmp_path):
 
 def test_write_hdf5_records_action_source(tmp_path):
     write_eval_trace(tmp_path)
-    data = convert(tmp_path, eval_cfg(), action_source="applied")
+    data = convert(tmp_path, eval_cfg(), action_source="applied", store_teacher_action=True)
     output = tmp_path / "out.h5"
 
     write_hdf5(data, output, overwrite=False, action_source="applied")
@@ -98,3 +109,5 @@ def test_write_hdf5_records_action_source(tmp_path):
     with h5py.File(output, "r") as f:
         assert f.attrs["action_source"] == "applied"
         assert f.attrs["action_alignment"] == "next_row_applied"
+        assert f.attrs["teacher_action_alignment"] == "same_frame_teacher"
+        assert "teacher_action" in f

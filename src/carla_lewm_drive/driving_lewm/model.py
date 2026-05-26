@@ -28,6 +28,8 @@ AUX_COMPONENTS = (
 @dataclass(frozen=True)
 class DrivingLeWMConfig:
     encoder_scale: str = "tiny"
+    encoder_pretrained_name: str | None = None
+    freeze_encoder: bool = False
     encoder_pooling: str = "cls"
     patch_size: int = 14
     image_size: int = 224
@@ -52,6 +54,13 @@ class DrivingLeWMConfig:
     aux_control_lane_gain: float = 0.35
     aux_control_heading_gain: float = 1.2
     aux_control_steer_limit: float = 0.35
+    aux_lane_edge_threshold: float = 0.0
+    aux_lane_edge_weight: float = 1.0
+    aux_lane_underamp_weight: float = 0.0
+    pred_aux_lane_underamp_weight: float = 0.0
+    aux_lane_underamp_threshold: float = 0.0
+    aux_lane_underamp_margin: float = 1.0
+    aux_lane_underamp_balance_signs: bool = False
     action_weight: float = 0.0
     pred_action_weight: float = 1.0
     action_component_weights: tuple[float, float, float] | None = None
@@ -59,6 +68,7 @@ class DrivingLeWMConfig:
     action_active_steer_threshold: float = 0.0
     action_conflict_weight: float = 0.0
     pred_action_conflict_weight: float = 1.0
+    action_teacher_only: bool = False
     progress_mode: str = "absolute"
     route_vocab_size: int = 0
     route_embed_scale: float = 1.0
@@ -66,6 +76,31 @@ class DrivingLeWMConfig:
     temporal_action_include_history_actions: bool = True
     temporal_action_history_noise_std: tuple[float, float, float] | None = None
     temporal_action_history_noise_prob: float = 0.0
+    use_temporal_aux_head: bool = False
+    temporal_aux_hidden_dim: int = 0
+    temporal_aux_dropout: float = 0.1
+    temporal_aux_zero_init: bool = True
+    aux_lane_sign_weight: float = 0.0
+    pred_aux_lane_sign_weight: float = 0.0
+    aux_lane_sign_threshold: float = 0.0
+    aux_lane_sign_balance: bool = False
+    aux_lane_sign_loss_type: str = "margin"
+    aux_lane_sign_logit_scale: float = 10.0
+    aux_heading_sign_weight: float = 0.0
+    pred_aux_heading_sign_weight: float = 0.0
+    aux_heading_sign_threshold: float = 0.0
+    aux_heading_sign_balance: bool = False
+    aux_heading_sign_loss_type: str = "margin"
+    aux_heading_sign_logit_scale: float = 10.0
+    aux_temporal_delta_weight: float = 0.0
+    aux_temporal_delta_lane_weight: float = 1.0
+    aux_temporal_delta_heading_weight: float = 1.0
+    aux_temporal_delta_active_lane_threshold: float = 0.0
+    aux_lane_patch_mode: str = "off"
+    aux_lane_patch_pooling: str = "attention"
+    aux_lane_patch_hidden_dim: int = 0
+    aux_lane_patch_dropout: float = 0.1
+    aux_lane_patch_zero_init: bool = True
 
 
 class ActionEmbedder(nn.Module):
@@ -114,6 +149,52 @@ class ARPredictor(nn.Module):
         return self.norm(self.transformer(x, mask=mask))
 
 
+class SpatialPatchLaneHead(nn.Module):
+    def __init__(
+        self,
+        *,
+        input_dim: int,
+        hidden_dim: int,
+        pooling: str,
+        dropout: float,
+        zero_init: bool,
+    ) -> None:
+        super().__init__()
+        self.pooling = str(pooling).lower()
+        if self.pooling not in {"attention", "mean"}:
+            raise ValueError("aux_lane_patch_pooling must be one of: attention, mean")
+        if self.pooling == "attention":
+            self.attn = nn.Sequential(
+                nn.LayerNorm(input_dim),
+                nn.Linear(input_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, 1),
+            )
+        else:
+            self.attn = None
+        self.head = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 2),
+        )
+        if zero_init:
+            final = self.head[-1]
+            nn.init.zeros_(final.weight)
+            nn.init.zeros_(final.bias)
+
+    def forward(self, patch_tokens: torch.Tensor) -> torch.Tensor:
+        if patch_tokens.ndim < 3:
+            raise ValueError(f"Expected patch tokens with shape [..., patches, dim], got {tuple(patch_tokens.shape)}")
+        if self.attn is None:
+            pooled = patch_tokens.mean(dim=-2)
+        else:
+            weights = torch.softmax(self.attn(patch_tokens), dim=-2)
+            pooled = (weights * patch_tokens).sum(dim=-2)
+        return self.head(pooled)
+
+
 class DrivingLeWM(nn.Module):
     def __init__(self, cfg: DrivingLeWMConfig) -> None:
         super().__init__()
@@ -121,6 +202,9 @@ class DrivingLeWM(nn.Module):
             raise ValueError(f"Unknown ViT scale {cfg.encoder_scale}; expected {sorted(VIT_CONFIGS)}")
         self.cfg = cfg
         self.encoder = self._make_vit(cfg)
+        if cfg.freeze_encoder:
+            for param in self.encoder.parameters():
+                param.requires_grad_(False)
         hidden_dim = int(self.encoder.config.hidden_size)
         projector_input_dim = self._encoder_output_dim(hidden_dim, cfg.encoder_pooling)
         self.projector = nn.Sequential(
@@ -149,6 +233,41 @@ class DrivingLeWM(nn.Module):
             if cfg.use_aux_head
             else None
         )
+        temporal_aux_hidden_dim = int(cfg.temporal_aux_hidden_dim) or cfg.embed_dim
+        self.temporal_aux_head = (
+            nn.Sequential(
+                nn.LayerNorm(cfg.embed_dim * cfg.history_size),
+                nn.Linear(cfg.embed_dim * cfg.history_size, temporal_aux_hidden_dim),
+                nn.GELU(),
+                nn.Dropout(float(cfg.temporal_aux_dropout)),
+                nn.Linear(temporal_aux_hidden_dim, 2),
+            )
+            if cfg.use_temporal_aux_head
+            else None
+        )
+        if self.temporal_aux_head is not None and self.aux_head is None:
+            raise ValueError("use_temporal_aux_head requires use_aux_head=true")
+        if self.temporal_aux_head is not None and bool(cfg.temporal_aux_zero_init):
+            final = self.temporal_aux_head[-1]
+            nn.init.zeros_(final.weight)
+            nn.init.zeros_(final.bias)
+        patch_mode = str(cfg.aux_lane_patch_mode).lower()
+        if patch_mode not in {"off", "residual", "replace"}:
+            raise ValueError("aux_lane_patch_mode must be one of: off, residual, replace")
+        if patch_mode != "off" and self.aux_head is None:
+            raise ValueError("aux_lane_patch_mode requires use_aux_head=true")
+        patch_hidden_dim = int(cfg.aux_lane_patch_hidden_dim) or hidden_dim
+        self.aux_lane_patch_head = (
+            SpatialPatchLaneHead(
+                input_dim=hidden_dim,
+                hidden_dim=patch_hidden_dim,
+                pooling=cfg.aux_lane_patch_pooling,
+                dropout=float(cfg.aux_lane_patch_dropout),
+                zero_init=bool(cfg.aux_lane_patch_zero_init),
+            )
+            if patch_mode != "off"
+            else None
+        )
         action_head_input_dim = cfg.embed_dim
         if cfg.use_temporal_action_head:
             action_head_input_dim = cfg.embed_dim * cfg.history_size
@@ -173,6 +292,13 @@ class DrivingLeWM(nn.Module):
         params["image_size"] = cfg.image_size
         params["patch_size"] = cfg.patch_size
         model_cfg = ViTConfig(**params)
+        if cfg.encoder_pretrained_name:
+            return ViTModel.from_pretrained(
+                cfg.encoder_pretrained_name,
+                config=model_cfg,
+                add_pooling_layer=False,
+                ignore_mismatched_sizes=True,
+            )
         return ViTModel(model_cfg, add_pooling_layer=False, use_mask_token=False)
 
     @staticmethod
@@ -185,21 +311,40 @@ class DrivingLeWM(nn.Module):
         raise ValueError("encoder_pooling must be one of: cls, mean_patch, cls_mean")
 
     def encode_pixels(self, pixels: torch.Tensor) -> torch.Tensor:
+        emb, _ = self.encode_pixels_with_patches(pixels)
+        return emb
+
+    def encode_pixels_with_patches(self, pixels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         b, t = pixels.shape[:2]
         flat = pixels.reshape(b * t, *pixels.shape[2:]).float()
         out = self.encoder(flat, interpolate_pos_encoding=True)
         tokens = out.last_hidden_state
+        patch_tokens = tokens[:, 1:]
         mode = str(self.cfg.encoder_pooling).lower()
         if mode == "cls":
             features = tokens[:, 0]
         elif mode == "mean_patch":
-            features = tokens[:, 1:].mean(dim=1)
+            features = patch_tokens.mean(dim=1)
         elif mode == "cls_mean":
-            features = torch.cat([tokens[:, 0], tokens[:, 1:].mean(dim=1)], dim=-1)
+            features = torch.cat([tokens[:, 0], patch_tokens.mean(dim=1)], dim=-1)
         else:
             raise ValueError("encoder_pooling must be one of: cls, mean_patch, cls_mean")
         emb = self.projector(features)
-        return emb.reshape(b, t, -1)
+        return emb.reshape(b, t, -1), patch_tokens.reshape(b, t, patch_tokens.shape[-2], patch_tokens.shape[-1])
+
+    def fuse_patch_lane_aux(self, aux: torch.Tensor, patch_tokens: torch.Tensor) -> torch.Tensor:
+        if self.aux_lane_patch_head is None:
+            return aux
+        patch_lane = self.aux_lane_patch_head(patch_tokens)
+        out = aux.clone()
+        mode = str(self.cfg.aux_lane_patch_mode).lower()
+        if mode == "residual":
+            out[..., 2:4] = out[..., 2:4] + patch_lane
+        elif mode == "replace":
+            out[..., 2:4] = patch_lane
+        else:
+            raise ValueError("aux_lane_patch_mode must be one of: off, residual, replace")
+        return out
 
     def apply_route_condition(self, emb: torch.Tensor, route_id: torch.Tensor | int | None) -> torch.Tensor:
         if self.route_embed is None:
@@ -229,6 +374,26 @@ class DrivingLeWM(nn.Module):
             raise ValueError(f"route_id must be scalar, [B], [T], [B,T], or [B,T,1], got {tuple(ids.shape)}")
         ids = ids.long().clamp(0, int(self.cfg.route_vocab_size) - 1)
         return emb + float(self.cfg.route_embed_scale) * self.route_embed(ids)
+
+    def temporal_aux_residual(self, emb: torch.Tensor) -> torch.Tensor:
+        if self.temporal_aux_head is None:
+            return emb.new_zeros((*emb.shape[:2], 2))
+        b, t, d = emb.shape
+        history_size = int(self.cfg.history_size)
+        if t <= 0:
+            raise ValueError("temporal aux head requires at least one frame")
+        pad = emb[:, :1].expand(b, history_size - 1, d)
+        padded = torch.cat([pad, emb], dim=1)
+        windows = [padded[:, i : i + history_size].reshape(b, history_size * d) for i in range(t)]
+        features = torch.stack(windows, dim=1)
+        return self.temporal_aux_head(features)
+
+    def fuse_temporal_aux(self, aux: torch.Tensor, emb: torch.Tensor) -> torch.Tensor:
+        if self.temporal_aux_head is None:
+            return aux
+        out = aux.clone()
+        out[..., 2:4] = out[..., 2:4] + self.temporal_aux_residual(emb)
+        return out
 
     def temporal_action_features(
         self,
@@ -274,7 +439,8 @@ class DrivingLeWM(nn.Module):
         return self.action_head(emb)
 
     def forward(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        emb = self.apply_route_condition(self.encode_pixels(batch["pixels"]), batch.get("route_id"))
+        emb, patch_tokens = self.encode_pixels_with_patches(batch["pixels"])
+        emb = self.apply_route_condition(emb, batch.get("route_id"))
         act_emb = self.action_encoder(batch["action"])
         ctx = emb[:, : self.cfg.history_size]
         ctx_act = act_emb[:, : self.cfg.history_size]
@@ -296,7 +462,8 @@ class DrivingLeWM(nn.Module):
             "pred_action": pred_action,
         }
         if self.aux_head is not None:
-            out["aux"] = self.aux_head(emb)
+            aux = self.fuse_temporal_aux(self.aux_head(emb), emb)
+            out["aux"] = self.fuse_patch_lane_aux(aux, patch_tokens)
             out["pred_aux"] = self.aux_head(pred)
         return out
 
@@ -322,11 +489,21 @@ class DrivingLeWM(nn.Module):
         component_weights: tuple[float, float, float] | list[float] | None = None,
         active_steer_weight: float = 1.0,
         active_steer_threshold: float = 0.0,
+        mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         raw = F.smooth_l1_loss(pred.float(), target.float(), reduction="none")
         block = raw.reshape(*raw.shape[:-1], -1, 3)
+        mask_block = None
+        if mask is not None:
+            mask_block = mask.float().to(block.device)
+            while mask_block.ndim < block.ndim:
+                mask_block = mask_block.unsqueeze(-1)
+            mask_block = mask_block.expand_as(block)
         reduce_dims = tuple(range(block.ndim - 1))
-        component_losses = block.mean(dim=reduce_dims)
+        if mask_block is None:
+            component_losses = block.mean(dim=reduce_dims)
+        else:
+            component_losses = (block * mask_block).sum(dim=reduce_dims) / mask_block.sum(dim=reduce_dims).clamp_min(1e-8)
 
         if component_weights is None:
             weights = pred.new_ones(3)
@@ -343,6 +520,8 @@ class DrivingLeWM(nn.Module):
                 weight_block[..., 1] * float(active_steer_weight),
                 weight_block[..., 1],
             )
+        if mask_block is not None:
+            weight_block = weight_block * mask_block
         total = (block * weight_block).sum() / weight_block.sum().clamp_min(1e-8)
         return total, {
             "throttle": component_losses[0],
@@ -384,6 +563,9 @@ class DrivingLeWM(nn.Module):
         pred: torch.Tensor,
         target: torch.Tensor,
         component_weights: tuple[float, float, float, float, float, float, float, float] | list[float] | None,
+        *,
+        lane_edge_threshold: float = 0.0,
+        lane_edge_weight: float = 1.0,
     ) -> torch.Tensor:
         raw = F.smooth_l1_loss(pred.float(), target.float(), reduction="none")
         if component_weights is None:
@@ -391,8 +573,13 @@ class DrivingLeWM(nn.Module):
         if len(component_weights) != pred.shape[-1]:
             raise ValueError(f"aux_component_weights must contain {pred.shape[-1]} values")
         weights = pred.new_tensor(component_weights, dtype=raw.dtype)
-        shaped = weights.reshape(*([1] * (raw.ndim - 1)), raw.shape[-1])
-        return (raw * shaped).sum() / shaped.expand_as(raw).sum().clamp_min(1e-8)
+        shaped = weights.reshape(*([1] * (raw.ndim - 1)), raw.shape[-1]).expand_as(raw).clone()
+        edge_weight = float(lane_edge_weight)
+        edge_threshold = max(0.0, float(lane_edge_threshold))
+        if edge_weight != 1.0 and edge_threshold > 0.0:
+            edge = target.float()[..., 2].abs() >= edge_threshold
+            shaped[..., 2] = torch.where(edge, shaped[..., 2] * edge_weight, shaped[..., 2])
+        return (raw * shaped).sum() / shaped.sum().clamp_min(1e-8)
 
     @staticmethod
     def aux_component_losses(pred: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -460,6 +647,93 @@ class DrivingLeWM(nn.Module):
                 loss = loss + float(sign_weight) * sign_penalty
         return loss
 
+    @staticmethod
+    def aux_lane_underamp_loss(
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        *,
+        active_threshold: float,
+        margin: float,
+        balance_signs: bool = False,
+    ) -> torch.Tensor:
+        pred_lane = pred.float()[..., 2]
+        target_lane = target.float()[..., 2]
+        active = target_lane.abs() >= max(0.0, float(active_threshold))
+        if not bool(active.any()):
+            return pred_lane.new_zeros(())
+        direction = torch.sign(target_lane[active])
+        signed_pred = pred_lane[active] * direction
+        required = target_lane[active].abs() * max(0.0, float(margin))
+        raw_penalty = F.relu(required - signed_pred)
+        if balance_signs:
+            group_penalties = []
+            for sign in (-1.0, 1.0):
+                group = direction == sign
+                if bool(group.any()):
+                    group_penalties.append(raw_penalty[group].mean())
+            if group_penalties:
+                return torch.stack(group_penalties).mean()
+        return raw_penalty.mean()
+
+    @staticmethod
+    def scalar_sign_loss(
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        *,
+        active_threshold: float,
+        balance_signs: bool = False,
+        mode: str = "margin",
+        logit_scale: float = 10.0,
+    ) -> torch.Tensor:
+        pred = pred.float()
+        target = target.float()
+        threshold = max(0.0, float(active_threshold))
+        active = target.abs() >= threshold
+        if not bool(active.any()):
+            return pred.new_zeros(())
+        mode = str(mode).lower()
+        direction = torch.sign(target[active])
+        if mode == "margin":
+            signed_pred = pred[active] * direction
+            raw_penalty = F.relu(threshold - signed_pred)
+        elif mode == "bce":
+            labels = (direction > 0.0).to(dtype=pred.dtype)
+            logits = pred[active] * max(1e-6, float(logit_scale))
+            raw_penalty = F.binary_cross_entropy_with_logits(logits, labels, reduction="none")
+        else:
+            raise ValueError("scalar sign loss mode must be one of: margin, bce")
+        if balance_signs:
+            group_penalties = []
+            for sign in (-1.0, 1.0):
+                group = direction == sign
+                if bool(group.any()):
+                    group_penalties.append(raw_penalty[group].mean())
+            if group_penalties:
+                return torch.stack(group_penalties).mean()
+        return raw_penalty.mean()
+
+    @staticmethod
+    def aux_temporal_delta_loss(
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        *,
+        lane_weight: float = 1.0,
+        heading_weight: float = 1.0,
+        active_lane_threshold: float = 0.0,
+    ) -> torch.Tensor:
+        if pred.shape[1] < 2:
+            return pred.new_zeros(())
+        pred_delta = pred.float()[:, 1:, 2:4] - pred.float()[:, :-1, 2:4]
+        target_delta = target.float()[:, 1:, 2:4] - target.float()[:, :-1, 2:4]
+        raw = F.smooth_l1_loss(pred_delta, target_delta, reduction="none")
+        weights = pred.new_tensor([lane_weight, heading_weight], dtype=raw.dtype).reshape(1, 1, 2)
+        shaped = weights.expand_as(raw).clone()
+        threshold = max(0.0, float(active_lane_threshold))
+        if threshold > 0.0:
+            lane_pair_abs = torch.maximum(target.float()[:, 1:, 2].abs(), target.float()[:, :-1, 2].abs())
+            shaped = shaped * (lane_pair_abs >= threshold).to(dtype=raw.dtype).unsqueeze(-1)
+        return (raw * shaped).sum() / shaped.sum().clamp_min(1e-8)
+
     def loss(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         out = self.forward(batch)
         pred_loss = F.mse_loss(out["pred_emb"], out["target_emb"])
@@ -474,14 +748,32 @@ class DrivingLeWM(nn.Module):
         aux_control_loss = zero
         pred_aux_control_loss = zero
         aux_control_total = zero
+        aux_lane_underamp_loss = zero
+        pred_aux_lane_underamp_loss = zero
+        aux_lane_underamp_total = zero
+        aux_lane_sign_loss = zero
+        pred_aux_lane_sign_loss = zero
+        aux_lane_sign_total = zero
+        aux_heading_sign_loss = zero
+        pred_aux_heading_sign_loss = zero
+        aux_heading_sign_total = zero
+        aux_temporal_delta_loss = zero
         if self.aux_head is not None:
             aux_target = self.aux_target(batch, self.cfg.progress_mode)
             pred_aux_target = aux_target[:, 1 : self.cfg.history_size + 1].detach()
-            aux_loss = self.aux_regression_loss(out["aux"], aux_target, self.cfg.aux_component_weights)
+            aux_loss = self.aux_regression_loss(
+                out["aux"],
+                aux_target,
+                self.cfg.aux_component_weights,
+                lane_edge_threshold=self.cfg.aux_lane_edge_threshold,
+                lane_edge_weight=self.cfg.aux_lane_edge_weight,
+            )
             pred_aux_loss = self.aux_regression_loss(
                 out["pred_aux"],
                 pred_aux_target,
                 self.cfg.aux_component_weights,
+                lane_edge_threshold=self.cfg.aux_lane_edge_threshold,
+                lane_edge_weight=self.cfg.aux_lane_edge_weight,
             )
             aux_total = aux_loss + self.cfg.pred_aux_weight * pred_aux_loss
             aux_parts = self.aux_component_losses(out["aux"], aux_target)
@@ -508,16 +800,95 @@ class DrivingLeWM(nn.Module):
                     balance_signs=self.cfg.aux_control_sign_balance,
                 )
                 aux_control_total = aux_control_loss + self.cfg.pred_aux_control_weight * pred_aux_control_loss
+            if float(self.cfg.aux_lane_underamp_weight) > 0.0:
+                aux_lane_underamp_loss = self.aux_lane_underamp_loss(
+                    out["aux"],
+                    aux_target,
+                    active_threshold=self.cfg.aux_lane_underamp_threshold,
+                    margin=self.cfg.aux_lane_underamp_margin,
+                    balance_signs=self.cfg.aux_lane_underamp_balance_signs,
+                )
+                pred_aux_lane_underamp_loss = self.aux_lane_underamp_loss(
+                    out["pred_aux"],
+                    pred_aux_target,
+                    active_threshold=self.cfg.aux_lane_underamp_threshold,
+                    margin=self.cfg.aux_lane_underamp_margin,
+                    balance_signs=self.cfg.aux_lane_underamp_balance_signs,
+                )
+                aux_lane_underamp_total = (
+                    aux_lane_underamp_loss
+                    + self.cfg.pred_aux_lane_underamp_weight * pred_aux_lane_underamp_loss
+                )
+            if float(self.cfg.aux_lane_sign_weight) > 0.0:
+                aux_lane_sign_loss = self.scalar_sign_loss(
+                    out["aux"][..., 2],
+                    aux_target[..., 2],
+                    active_threshold=self.cfg.aux_lane_sign_threshold,
+                    balance_signs=self.cfg.aux_lane_sign_balance,
+                    mode=self.cfg.aux_lane_sign_loss_type,
+                    logit_scale=self.cfg.aux_lane_sign_logit_scale,
+                )
+                pred_aux_lane_sign_loss = self.scalar_sign_loss(
+                    out["pred_aux"][..., 2],
+                    pred_aux_target[..., 2],
+                    active_threshold=self.cfg.aux_lane_sign_threshold,
+                    balance_signs=self.cfg.aux_lane_sign_balance,
+                    mode=self.cfg.aux_lane_sign_loss_type,
+                    logit_scale=self.cfg.aux_lane_sign_logit_scale,
+                )
+                aux_lane_sign_total = (
+                    aux_lane_sign_loss
+                    + self.cfg.pred_aux_lane_sign_weight * pred_aux_lane_sign_loss
+                )
+            if float(self.cfg.aux_heading_sign_weight) > 0.0:
+                aux_heading_sign_loss = self.scalar_sign_loss(
+                    out["aux"][..., 3],
+                    aux_target[..., 3],
+                    active_threshold=self.cfg.aux_heading_sign_threshold,
+                    balance_signs=self.cfg.aux_heading_sign_balance,
+                    mode=self.cfg.aux_heading_sign_loss_type,
+                    logit_scale=self.cfg.aux_heading_sign_logit_scale,
+                )
+                pred_aux_heading_sign_loss = self.scalar_sign_loss(
+                    out["pred_aux"][..., 3],
+                    pred_aux_target[..., 3],
+                    active_threshold=self.cfg.aux_heading_sign_threshold,
+                    balance_signs=self.cfg.aux_heading_sign_balance,
+                    mode=self.cfg.aux_heading_sign_loss_type,
+                    logit_scale=self.cfg.aux_heading_sign_logit_scale,
+                )
+                aux_heading_sign_total = (
+                    aux_heading_sign_loss
+                    + self.cfg.pred_aux_heading_sign_weight * pred_aux_heading_sign_loss
+                )
+            if float(self.cfg.aux_temporal_delta_weight) > 0.0:
+                aux_temporal_delta_loss = self.aux_temporal_delta_loss(
+                    out["aux"],
+                    aux_target,
+                    lane_weight=self.cfg.aux_temporal_delta_lane_weight,
+                    heading_weight=self.cfg.aux_temporal_delta_heading_weight,
+                    active_lane_threshold=self.cfg.aux_temporal_delta_active_lane_threshold,
+                )
 
-        action_target_all = batch["action"].float()
+        action_target_all = batch.get("teacher_action", batch["action"]).float()
+        action_mask_all = batch.get("teacher_action_mask")
         action_target = action_target_all[:, -1] if self.cfg.use_temporal_action_head else action_target_all
         pred_action_target = action_target_all[:, 1 : self.cfg.history_size + 1].detach()
+        action_mask = None
+        pred_action_mask = None
+        if self.cfg.action_teacher_only:
+            if action_mask_all is None:
+                action_mask_all = action_target_all.new_zeros((*action_target_all.shape[:-1], 1))
+            action_mask_all = action_mask_all.to(action_target_all.device).float()
+            action_mask = action_mask_all[:, -1] if self.cfg.use_temporal_action_head else action_mask_all
+            pred_action_mask = action_mask_all[:, 1 : self.cfg.history_size + 1].detach()
         action_loss, action_parts = self.action_regression_loss(
             out["action"],
             action_target,
             component_weights=self.cfg.action_component_weights,
             active_steer_weight=self.cfg.action_active_steer_weight,
             active_steer_threshold=self.cfg.action_active_steer_threshold,
+            mask=action_mask,
         )
         if self.cfg.use_temporal_action_head:
             pred_action_loss = zero
@@ -529,6 +900,7 @@ class DrivingLeWM(nn.Module):
                 component_weights=self.cfg.action_component_weights,
                 active_steer_weight=self.cfg.action_active_steer_weight,
                 active_steer_threshold=self.cfg.action_active_steer_threshold,
+                mask=pred_action_mask,
             )
         action_total = action_loss + self.cfg.pred_action_weight * pred_action_loss
         action_conflict = self.action_conflict_loss(out["action"])
@@ -542,6 +914,10 @@ class DrivingLeWM(nn.Module):
             + self.cfg.sigreg_weight * sigreg
             + self.cfg.aux_weight * aux_total
             + self.cfg.aux_control_weight * aux_control_total
+            + self.cfg.aux_lane_underamp_weight * aux_lane_underamp_total
+            + self.cfg.aux_lane_sign_weight * aux_lane_sign_total
+            + self.cfg.aux_heading_sign_weight * aux_heading_sign_total
+            + self.cfg.aux_temporal_delta_weight * aux_temporal_delta_loss
             + self.cfg.action_weight * action_total
             + self.cfg.action_conflict_weight * action_conflict_total
         )
@@ -555,6 +931,13 @@ class DrivingLeWM(nn.Module):
             **{f"pred_aux_{name}_loss": value.detach() for name, value in pred_aux_parts.items()},
             "aux_control_loss": aux_control_loss.detach(),
             "pred_aux_control_loss": pred_aux_control_loss.detach(),
+            "aux_lane_underamp_loss": aux_lane_underamp_loss.detach(),
+            "pred_aux_lane_underamp_loss": pred_aux_lane_underamp_loss.detach(),
+            "aux_lane_sign_loss": aux_lane_sign_loss.detach(),
+            "pred_aux_lane_sign_loss": pred_aux_lane_sign_loss.detach(),
+            "aux_heading_sign_loss": aux_heading_sign_loss.detach(),
+            "pred_aux_heading_sign_loss": pred_aux_heading_sign_loss.detach(),
+            "aux_temporal_delta_loss": aux_temporal_delta_loss.detach(),
             "action_loss": action_loss.detach(),
             "pred_action_loss": pred_action_loss.detach(),
             "action_throttle_loss": action_parts["throttle"].detach(),
@@ -602,5 +985,8 @@ class DrivingLeWM(nn.Module):
         if self.aux_head is None:
             raise RuntimeError("perceive_aux requires use_aux_head=true")
         self.eval()
-        emb = self.apply_route_condition(self.encode_pixels(pixels), route_id)
-        return self.aux_head(emb[:, -1])
+        emb, patch_tokens = self.encode_pixels_with_patches(pixels)
+        emb = self.apply_route_condition(emb, route_id)
+        aux_all = self.fuse_temporal_aux(self.aux_head(emb), emb)
+        aux = aux_all[:, -1]
+        return self.fuse_patch_lane_aux(aux, patch_tokens[:, -1])

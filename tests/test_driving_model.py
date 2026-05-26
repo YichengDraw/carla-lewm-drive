@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch import nn
 
-from carla_lewm_drive.driving_lewm.model import DrivingLeWM, DrivingLeWMConfig
+from carla_lewm_drive.driving_lewm.model import DrivingLeWM, DrivingLeWMConfig, SpatialPatchLaneHead
 
 
 def batch_with_progress(progress):
@@ -54,6 +54,24 @@ def test_aux_regression_loss_can_weight_lane_feedback_terms():
     assert float(loss) == pytest.approx(expected)
 
 
+def test_aux_regression_loss_can_upweight_lane_edge_samples():
+    pred = torch.zeros(1, 2, 8)
+    target = torch.zeros(1, 2, 8)
+    target[..., 2] = torch.tensor([0.1, 0.5])
+
+    base = DrivingLeWM.aux_regression_loss(pred, target, [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    edge = DrivingLeWM.aux_regression_loss(
+        pred,
+        target,
+        [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        lane_edge_threshold=0.25,
+        lane_edge_weight=4.0,
+    )
+
+    assert float(base) == pytest.approx((0.5 * 0.1**2 + 0.5 * 0.5**2) / 2.0)
+    assert float(edge) == pytest.approx((0.5 * 0.1**2 + 4.0 * 0.5 * 0.5**2) / 5.0)
+
+
 def test_aux_control_loss_penalizes_wrong_steering_direction():
     target = torch.zeros(1, 1, 8)
     same_direction = torch.zeros(1, 1, 8)
@@ -92,6 +110,94 @@ def test_aux_control_loss_can_balance_steering_sign_groups():
     balanced = DrivingLeWM.aux_control_loss(pred, target, balance_signs=True, **kwargs)
 
     assert float(balanced) > float(unbalanced)
+
+
+def test_aux_lane_underamp_loss_penalizes_small_same_sign_prediction():
+    target = torch.zeros(1, 2, 8)
+    good = torch.zeros(1, 2, 8)
+    weak = torch.zeros(1, 2, 8)
+    target[..., 2] = torch.tensor([0.5, -0.5])
+    good[..., 2] = torch.tensor([0.5, -0.5])
+    weak[..., 2] = torch.tensor([0.05, -0.05])
+
+    good_loss = DrivingLeWM.aux_lane_underamp_loss(
+        good,
+        target,
+        active_threshold=0.25,
+        margin=0.9,
+    )
+    weak_loss = DrivingLeWM.aux_lane_underamp_loss(
+        weak,
+        target,
+        active_threshold=0.25,
+        margin=0.9,
+    )
+
+    assert float(good_loss) == pytest.approx(0.0)
+    assert float(weak_loss) == pytest.approx(0.4)
+
+
+def test_scalar_sign_loss_penalizes_wrong_component_direction():
+    target = torch.tensor([[-0.2, 0.2, 0.2]], dtype=torch.float32)
+    same = torch.tensor([[-0.1, 0.1, 0.1]], dtype=torch.float32)
+    wrong = torch.tensor([[0.1, -0.1, 0.1]], dtype=torch.float32)
+
+    same_loss = DrivingLeWM.scalar_sign_loss(same, target, active_threshold=0.05, balance_signs=True)
+    wrong_loss = DrivingLeWM.scalar_sign_loss(wrong, target, active_threshold=0.05, balance_signs=True)
+
+    assert float(same_loss) == pytest.approx(0.0)
+    assert float(wrong_loss) > float(same_loss)
+
+
+def test_scalar_sign_loss_bce_penalizes_wrong_component_direction():
+    target = torch.tensor([[-0.2, 0.2]], dtype=torch.float32)
+    same = torch.tensor([[-0.3, 0.3]], dtype=torch.float32)
+    wrong = torch.tensor([[0.3, -0.3]], dtype=torch.float32)
+
+    same_loss = DrivingLeWM.scalar_sign_loss(
+        same,
+        target,
+        active_threshold=0.05,
+        balance_signs=True,
+        mode="bce",
+        logit_scale=10.0,
+    )
+    wrong_loss = DrivingLeWM.scalar_sign_loss(
+        wrong,
+        target,
+        active_threshold=0.05,
+        balance_signs=True,
+        mode="bce",
+        logit_scale=10.0,
+    )
+
+    assert float(same_loss) < 0.1
+    assert float(wrong_loss) > float(same_loss) * 10.0
+
+
+def test_scalar_sign_loss_rejects_unknown_mode():
+    target = torch.tensor([[0.2]], dtype=torch.float32)
+    pred = torch.tensor([[0.1]], dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="scalar sign loss mode"):
+        DrivingLeWM.scalar_sign_loss(pred, target, active_threshold=0.05, mode="bad")
+
+
+def test_aux_temporal_delta_loss_penalizes_unstable_lane_heading_changes():
+    target = torch.zeros(1, 4, 8)
+    good = torch.zeros(1, 4, 8)
+    unstable = torch.zeros(1, 4, 8)
+    target[..., 2] = torch.tensor([0.10, 0.20, 0.30, 0.40])
+    target[..., 3] = torch.tensor([0.01, 0.02, 0.03, 0.04])
+    good[..., 2:4] = target[..., 2:4]
+    unstable[..., 2] = torch.tensor([0.10, -0.20, 0.30, -0.40])
+    unstable[..., 3] = torch.tensor([0.01, -0.02, 0.03, -0.04])
+
+    good_loss = DrivingLeWM.aux_temporal_delta_loss(good, target, lane_weight=1.0, heading_weight=1.0)
+    unstable_loss = DrivingLeWM.aux_temporal_delta_loss(unstable, target, lane_weight=1.0, heading_weight=1.0)
+
+    assert float(good_loss) == pytest.approx(0.0)
+    assert float(unstable_loss) > float(good_loss)
 
 
 def test_progress_signal_rejects_unknown_mode():
@@ -145,6 +251,169 @@ def test_encoder_pooling_can_use_patch_tokens(monkeypatch):
         combined_model.encode_pixels(pixels),
         torch.tensor([[[10.0, 11.0, 12.0, 13.0, 3.0, 4.0, 5.0, 6.0]]]),
     )
+
+
+def test_freeze_encoder_disables_only_encoder_gradients(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+            self.proj = nn.Linear(1, 1)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            values = torch.arange(batch * 8, dtype=pixels.dtype, device=pixels.device).reshape(batch, 2, 4)
+            return SimpleNamespace(last_hidden_state=values)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    cfg = DrivingLeWMConfig(
+        image_size=8,
+        patch_size=4,
+        action_dim=3,
+        embed_dim=4,
+        history_size=1,
+        predictor_depth=1,
+        predictor_heads=1,
+        predictor_mlp_dim=8,
+        use_aux_head=False,
+        freeze_encoder=True,
+    )
+
+    model = DrivingLeWM(cfg)
+
+    assert all(not param.requires_grad for param in model.encoder.parameters())
+    assert any(param.requires_grad for param in model.projector.parameters())
+
+
+def test_spatial_patch_lane_head_zero_init_starts_as_noop():
+    head = SpatialPatchLaneHead(
+        input_dim=4,
+        hidden_dim=8,
+        pooling="attention",
+        dropout=0.0,
+        zero_init=True,
+    )
+    tokens = torch.randn(2, 3, 5, 4)
+
+    out = head(tokens)
+
+    assert out.shape == (2, 3, 2)
+    torch.testing.assert_close(out, torch.zeros_like(out))
+
+
+def test_patch_lane_residual_affects_perception_aux_without_pred_aux(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            tokens = torch.tensor(
+                [
+                    [0.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                ],
+                dtype=pixels.dtype,
+                device=pixels.device,
+            )
+            return SimpleNamespace(last_hidden_state=tokens.unsqueeze(0).expand(batch, -1, -1))
+
+    class ConstantPatchLaneHead(nn.Module):
+        def forward(self, patch_tokens):
+            return patch_tokens.new_tensor([0.3, -0.2]).expand(*patch_tokens.shape[:-2], 2)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    model = DrivingLeWM(
+        DrivingLeWMConfig(
+            image_size=8,
+            patch_size=4,
+            action_dim=3,
+            embed_dim=4,
+            history_size=2,
+            predictor_depth=1,
+            predictor_heads=1,
+            predictor_mlp_dim=8,
+            encoder_pooling="mean_patch",
+            use_aux_head=True,
+            aux_lane_patch_mode="residual",
+        )
+    )
+    model.projector = nn.Identity()
+    for param in model.aux_head.parameters():
+        nn.init.zeros_(param)
+    model.aux_lane_patch_head = ConstantPatchLaneHead()
+    pixels = torch.zeros(1, 3, 3, 8, 8)
+    actions = torch.zeros(1, 3, 3)
+
+    perceived = model.perceive_aux(pixels)
+    out = model({"pixels": pixels, "action": actions})
+    rolled = model.rollout_aux(pixels[:, :2], actions[:, :2])
+
+    assert perceived.shape == (1, 8)
+    torch.testing.assert_close(perceived[:, 2:4], torch.tensor([[0.3, -0.2]]))
+    torch.testing.assert_close(out["aux"][..., 2], torch.full((1, 3), 0.3))
+    torch.testing.assert_close(out["aux"][..., 3], torch.full((1, 3), -0.2))
+    torch.testing.assert_close(out["pred_aux"][..., 2:4], torch.zeros_like(out["pred_aux"][..., 2:4]))
+    torch.testing.assert_close(rolled, torch.zeros_like(rolled))
+
+
+def test_temporal_aux_residual_affects_perception_aux_without_pred_aux(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            tokens = torch.tensor(
+                [
+                    [0.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                ],
+                dtype=pixels.dtype,
+                device=pixels.device,
+            )
+            return SimpleNamespace(last_hidden_state=tokens.unsqueeze(0).expand(batch, -1, -1))
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    model = DrivingLeWM(
+        DrivingLeWMConfig(
+            image_size=8,
+            patch_size=4,
+            action_dim=3,
+            embed_dim=4,
+            history_size=3,
+            predictor_depth=1,
+            predictor_heads=1,
+            predictor_mlp_dim=8,
+            encoder_pooling="mean_patch",
+            use_aux_head=True,
+            use_temporal_aux_head=True,
+            temporal_aux_zero_init=True,
+        )
+    )
+    model.projector = nn.Identity()
+    for param in model.aux_head.parameters():
+        nn.init.zeros_(param)
+    assert model.temporal_aux_head is not None
+    for param in model.temporal_aux_head.parameters():
+        nn.init.zeros_(param)
+    model.temporal_aux_head[-1].bias.data = torch.tensor([0.4, -0.3])
+    pixels = torch.zeros(1, 4, 3, 8, 8)
+    actions = torch.zeros(1, 4, 3)
+
+    perceived = model.perceive_aux(pixels)
+    out = model({"pixels": pixels, "action": actions})
+    rolled = model.rollout_aux(pixels[:, :3], actions[:, :3])
+
+    torch.testing.assert_close(perceived[:, 2:4], torch.tensor([[0.4, -0.3]]))
+    torch.testing.assert_close(out["aux"][..., 2], torch.full((1, 4), 0.4))
+    torch.testing.assert_close(out["aux"][..., 3], torch.full((1, 4), -0.3))
+    torch.testing.assert_close(out["pred_aux"][..., 2:4], torch.zeros_like(out["pred_aux"][..., 2:4]))
+    torch.testing.assert_close(rolled, torch.zeros_like(rolled))
 
 
 def test_action_conflict_loss_penalizes_positive_throttle_and_brake_overlap():
@@ -271,6 +540,96 @@ def test_perceive_aux_reads_current_image_aux(monkeypatch):
     aux = model.perceive_aux(pixels)
 
     assert aux.shape == (1, 8)
+
+
+def test_action_loss_prefers_teacher_action_target_when_present(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            values = torch.arange(batch * 8, dtype=pixels.dtype, device=pixels.device).reshape(batch, 2, 4)
+            return SimpleNamespace(last_hidden_state=values)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    cfg = DrivingLeWMConfig(
+        image_size=8,
+        patch_size=4,
+        action_dim=3,
+        embed_dim=4,
+        history_size=2,
+        predictor_depth=1,
+        predictor_heads=1,
+        predictor_mlp_dim=8,
+        pred_weight=0.0,
+        sigreg_weight=0.0,
+        use_aux_head=False,
+        aux_weight=0.0,
+        action_weight=1.0,
+        pred_action_weight=0.0,
+    )
+    model = DrivingLeWM(cfg)
+    for param in model.action_head.parameters():
+        nn.init.zeros_(param)
+    batch = {
+        **batch_with_progress([0.0, 1.0]),
+        "pixels": torch.zeros(1, 2, 3, 8, 8),
+        "action": torch.zeros(1, 2, 3),
+    }
+
+    action_loss = model.loss(batch)["action_loss"]
+    teacher_action_loss = model.loss({**batch, "teacher_action": torch.ones(1, 2, 3)})["action_loss"]
+
+    assert float(action_loss) == pytest.approx(0.0)
+    assert float(teacher_action_loss) > 0.0
+
+
+def test_action_teacher_only_uses_teacher_mask(monkeypatch):
+    class DummyEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.config = SimpleNamespace(hidden_size=4)
+
+        def forward(self, pixels, interpolate_pos_encoding=True):
+            batch = pixels.shape[0]
+            values = torch.arange(batch * 8, dtype=pixels.dtype, device=pixels.device).reshape(batch, 2, 4)
+            return SimpleNamespace(last_hidden_state=values)
+
+    monkeypatch.setattr(DrivingLeWM, "_make_vit", staticmethod(lambda _cfg: DummyEncoder()))
+    cfg = DrivingLeWMConfig(
+        image_size=8,
+        patch_size=4,
+        action_dim=3,
+        embed_dim=4,
+        history_size=2,
+        predictor_depth=1,
+        predictor_heads=1,
+        predictor_mlp_dim=8,
+        pred_weight=0.0,
+        sigreg_weight=0.0,
+        use_aux_head=False,
+        aux_weight=0.0,
+        action_weight=1.0,
+        pred_action_weight=0.0,
+        action_teacher_only=True,
+    )
+    model = DrivingLeWM(cfg)
+    for param in model.action_head.parameters():
+        nn.init.zeros_(param)
+    batch = {
+        **batch_with_progress([0.0, 1.0]),
+        "pixels": torch.zeros(1, 2, 3, 8, 8),
+        "action": torch.zeros(1, 2, 3),
+        "teacher_action": torch.ones(1, 2, 3),
+    }
+
+    masked_out = model.loss({**batch, "teacher_action_mask": torch.zeros(1, 2, 1)})["action_loss"]
+    masked_in = model.loss({**batch, "teacher_action_mask": torch.ones(1, 2, 1)})["action_loss"]
+
+    assert float(masked_out) == pytest.approx(0.0)
+    assert float(masked_in) > 0.0
 
 
 def test_route_conditioning_is_optional_and_requires_route_ids(monkeypatch):

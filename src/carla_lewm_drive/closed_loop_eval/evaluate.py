@@ -5,7 +5,7 @@ import csv
 import json
 import queue
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +32,8 @@ def parse_args() -> argparse.Namespace:
             "model_lane_keep",
             "model_action",
             "model_action_lane_keep",
+            "model_action_steer_speed_keep",
+            "model_action_steer_speed_keep_smooth",
             "model_perception_lane_keep",
             "model_rollout_lane_keep",
             "expert",
@@ -74,6 +76,14 @@ def normalize_policy(policy: str | None) -> str:
         return "model_action"
     if value in {"model_action_lane_keep", "action_lane_keep"}:
         return "model_action_lane_keep"
+    if value in {"model_action_steer_speed_keep", "action_steer_speed_keep", "model_steer_speed_keep"}:
+        return "model_action_steer_speed_keep"
+    if value in {
+        "model_action_steer_speed_keep_smooth",
+        "action_steer_speed_keep_smooth",
+        "model_steer_speed_keep_smooth",
+    }:
+        return "model_action_steer_speed_keep_smooth"
     if value in {"model_perception_lane_keep", "perception_lane_keep"}:
         return "model_perception_lane_keep"
     if value in {"model_rollout_lane_keep", "rollout_lane_keep"}:
@@ -97,13 +107,20 @@ def requires_model(policy: str) -> bool:
         "model_lane_keep",
         "model_action",
         "model_action_lane_keep",
+        "model_action_steer_speed_keep",
+        "model_action_steer_speed_keep_smooth",
         "model_perception_lane_keep",
         "model_rollout_lane_keep",
     }
 
 
 def is_action_policy(policy: str) -> bool:
-    return policy in {"model_action", "model_action_lane_keep"}
+    return policy in {
+        "model_action",
+        "model_action_lane_keep",
+        "model_action_steer_speed_keep",
+        "model_action_steer_speed_keep_smooth",
+    }
 
 
 def resolve_policy(cfg: dict[str, Any], args: argparse.Namespace | None = None) -> str:
@@ -335,63 +352,31 @@ class EpisodeAccumulator:
         )
 
 
+def lewm_config_from_checkpoint_cfg(cfg: dict[str, Any]) -> DrivingLeWMConfig:
+    model = dict(cfg["model"])
+    data = cfg["data"]
+    model["image_size"] = int(data["image_size"])
+    model["history_size"] = int(data["history_size"])
+    model["action_dim"] = int(data["frameskip"]) * 3
+    tuple_fields = {
+        "aux_component_weights",
+        "action_component_weights",
+        "temporal_action_history_noise_std",
+    }
+    allowed = {field.name for field in fields(DrivingLeWMConfig)}
+    kwargs = {key: value for key, value in model.items() if key in allowed}
+    for key in tuple_fields:
+        if kwargs.get(key) is not None:
+            kwargs[key] = tuple(float(value) for value in kwargs[key])
+    return DrivingLeWMConfig(**kwargs)
+
+
 def load_model(checkpoint_path: Path) -> DrivingLeWM:
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     payload = torch.load(checkpoint_path, map_location="cpu")
     cfg = payload["cfg"]
-    model_cfg = cfg["model"]
-    data_cfg = cfg["data"]
-    action_dim = int(data_cfg["frameskip"]) * 3
-    lewm_cfg = DrivingLeWMConfig(
-        encoder_scale=model_cfg["encoder_scale"],
-        encoder_pooling=str(model_cfg.get("encoder_pooling", "cls")),
-        patch_size=int(model_cfg["patch_size"]),
-        image_size=int(data_cfg["image_size"]),
-        action_dim=action_dim,
-        embed_dim=int(model_cfg["embed_dim"]),
-        history_size=int(data_cfg["history_size"]),
-        predictor_depth=int(model_cfg["predictor_depth"]),
-        predictor_heads=int(model_cfg["predictor_heads"]),
-        predictor_mlp_dim=int(model_cfg["predictor_mlp_dim"]),
-        dropout=float(model_cfg["dropout"]),
-        pred_weight=float(model_cfg.get("pred_weight", 1.0)),
-        sigreg_weight=float(model_cfg["sigreg_weight"]),
-        use_aux_head=bool(model_cfg.get("use_aux_head", True)),
-        aux_weight=float(model_cfg["aux_weight"]),
-        pred_aux_weight=float(model_cfg.get("pred_aux_weight", 1.0)),
-        aux_component_weights=(
-            tuple(float(x) for x in model_cfg["aux_component_weights"])
-            if model_cfg.get("aux_component_weights") is not None
-            else None
-        ),
-        aux_control_weight=float(model_cfg.get("aux_control_weight", 0.0)),
-        pred_aux_control_weight=float(model_cfg.get("pred_aux_control_weight", 1.0)),
-        aux_control_sign_weight=float(model_cfg.get("aux_control_sign_weight", 0.0)),
-        aux_control_active_threshold=float(model_cfg.get("aux_control_active_threshold", 0.02)),
-        aux_control_sign_balance=bool(model_cfg.get("aux_control_sign_balance", False)),
-        aux_control_lane_gain=float(model_cfg.get("aux_control_lane_gain", 0.35)),
-        aux_control_heading_gain=float(model_cfg.get("aux_control_heading_gain", 1.2)),
-        aux_control_steer_limit=float(model_cfg.get("aux_control_steer_limit", 0.35)),
-        action_weight=float(model_cfg.get("action_weight", 0.0)),
-        pred_action_weight=float(model_cfg.get("pred_action_weight", 1.0)),
-        action_conflict_weight=float(model_cfg.get("action_conflict_weight", 0.0)),
-        pred_action_conflict_weight=float(model_cfg.get("pred_action_conflict_weight", 1.0)),
-        progress_mode=str(model_cfg.get("progress_mode", "absolute")),
-        route_vocab_size=int(model_cfg.get("route_vocab_size", 0)),
-        route_embed_scale=float(model_cfg.get("route_embed_scale", 1.0)),
-        use_temporal_action_head=bool(model_cfg.get("use_temporal_action_head", False)),
-        temporal_action_include_history_actions=bool(
-            model_cfg.get("temporal_action_include_history_actions", True)
-        ),
-        temporal_action_history_noise_std=(
-            tuple(float(x) for x in model_cfg["temporal_action_history_noise_std"])
-            if model_cfg.get("temporal_action_history_noise_std") is not None
-            else None
-        ),
-        temporal_action_history_noise_prob=float(model_cfg.get("temporal_action_history_noise_prob", 0.0)),
-    )
-    model = DrivingLeWM(lewm_cfg)
+    model = DrivingLeWM(lewm_config_from_checkpoint_cfg(cfg))
     try:
         model.load_state_dict(payload["model"], strict=True)
         model._checkpoint_missing_action_head = False
@@ -505,10 +490,14 @@ def write_action_trace(output_dir: Path, episode_idx: int, rows: list[dict[str, 
         "aux_speed_mps",
         "aux_lane_offset_m",
         "aux_heading_error_rad",
+        "aux_lane_offset_raw_m",
+        "aux_heading_error_raw_rad",
+        "aux_lane_filter_active",
         "aux_control_steer",
         "offroad",
         "lane_invasion",
         "red_light",
+        "red_light_stop",
         "speed_limit_violation",
         "blocked",
         "collision_count",
@@ -632,6 +621,35 @@ def force_green_lights(carla, world, enabled: bool) -> None:
         actor.freeze(True)
 
 
+def is_red_traffic_light(carla, ego) -> bool:
+    return bool(ego.is_at_traffic_light() and ego.get_traffic_light_state() == carla.TrafficLightState.Red)
+
+
+def red_light_monitor_enabled(eval_cfg: dict[str, Any]) -> bool:
+    return bool(eval_cfg.get("monitor_red_lights", not bool(eval_cfg.get("force_green_lights", False))))
+
+
+def update_red_light_violation(
+    *,
+    red_signal_active: bool,
+    speed_mps: float,
+    previous_seconds: float,
+    fixed_delta_seconds: float,
+    eval_cfg: dict[str, Any],
+) -> tuple[float, bool]:
+    raw_red_light = bool(
+        red_signal_active and speed_mps > float(eval_cfg.get("red_light_speed_threshold_mps", 0.2))
+    )
+    if raw_red_light:
+        red_light_seconds = float(previous_seconds) + float(fixed_delta_seconds)
+    else:
+        red_light_seconds = 0.0
+    red_light = bool(
+        raw_red_light and red_light_seconds >= float(eval_cfg.get("red_light_grace_seconds", 0.0))
+    )
+    return red_light_seconds, red_light
+
+
 def set_weather(carla, world, weather_name: str) -> None:
     weather = getattr(carla.WeatherParameters, weather_name, None)
     if weather is None:
@@ -683,6 +701,53 @@ def lane_keep_action(lane_offset_m: float, heading_error_rad: float, speed_mps: 
     return np.asarray([throttle, lane_keep_steer(lane_offset_m, heading_error_rad, eval_cfg), brake], dtype=np.float32)
 
 
+def filter_perception_lane_state(
+    lane_offset_m: float,
+    heading_error_rad: float,
+    previous_state: tuple[float, float] | None,
+    eval_cfg: dict[str, Any],
+) -> tuple[float, float, tuple[float, float] | None, bool]:
+    filter_cfg = dict(eval_cfg.get("perception_lane_filter", {}))
+    if not bool(filter_cfg.get("enabled", False)):
+        return float(lane_offset_m), float(heading_error_rad), previous_state, False
+
+    alpha = float(np.clip(float(filter_cfg.get("alpha", 0.25)), 0.0, 1.0))
+    heading_alpha = float(np.clip(float(filter_cfg.get("heading_alpha", alpha)), 0.0, 1.0))
+    small_flip_abs = abs(float(filter_cfg.get("small_flip_abs", 0.08)))
+    max_flip_abs = abs(float(filter_cfg.get("max_flip_abs", small_flip_abs)))
+    flip_decay = float(np.clip(float(filter_cfg.get("flip_decay", 0.98)), 0.0, 1.0))
+    max_abs_lane = abs(float(filter_cfg.get("max_abs_lane", 2.0)))
+    max_abs_heading = abs(float(filter_cfg.get("max_abs_heading", 0.6)))
+    raw_lane = float(np.clip(float(lane_offset_m), -max_abs_lane, max_abs_lane))
+    raw_heading = float(np.clip(float(heading_error_rad), -max_abs_heading, max_abs_heading))
+    if previous_state is None:
+        state = (raw_lane, raw_heading)
+        return raw_lane, raw_heading, state, False
+
+    prev_lane, prev_heading = previous_state
+    reverse_flip = raw_lane * prev_lane <= 0.0 and abs(prev_lane) > small_flip_abs and abs(raw_lane) <= max_flip_abs
+    if reverse_flip:
+        filtered_lane = float(prev_lane) * flip_decay
+        filter_active = True
+    else:
+        filtered_lane = (1.0 - alpha) * float(prev_lane) + alpha * raw_lane
+        filter_active = abs(filtered_lane - raw_lane) > 1e-6
+    filtered_lane = float(np.clip(filtered_lane, -max_abs_lane, max_abs_lane))
+    filtered_heading = (1.0 - heading_alpha) * float(prev_heading) + heading_alpha * raw_heading
+    filtered_heading = float(np.clip(filtered_heading, -max_abs_heading, max_abs_heading))
+    state = (filtered_lane, filtered_heading)
+    return filtered_lane, filtered_heading, state, filter_active
+
+
+def apply_red_light_stop(action: np.ndarray, red_light_active: bool, eval_cfg: dict[str, Any]) -> np.ndarray:
+    if not bool(eval_cfg.get("red_light_stop", False)) or not bool(red_light_active):
+        return np.asarray(action, dtype=np.float32)
+    out = np.asarray(action, dtype=np.float32).copy()
+    out[0] = 0.0
+    out[2] = max(float(out[2]), float(eval_cfg.get("red_light_stop_brake", 0.8)))
+    return out
+
+
 def flatten_model_action_to_block(action_flat: np.ndarray, action_dim: int) -> np.ndarray:
     action_flat = np.asarray(action_flat, dtype=np.float32).reshape(-1)
     if action_flat.shape[0] != int(action_dim):
@@ -703,6 +768,46 @@ def maybe_govern_model_speed(action: np.ndarray, lane_offset_m: float, heading_e
     else:
         out[2] = max(float(out[2]), float(governed[2]))
     return out
+
+
+def smooth_model_action_block(
+    block: np.ndarray,
+    *,
+    previous_steer: float | None,
+    eval_cfg: dict[str, Any],
+) -> tuple[np.ndarray, float | None]:
+    smooth_cfg = dict(eval_cfg.get("model_action_smoothing", {}))
+    block = np.asarray(block, dtype=np.float32).reshape(-1, 3).copy()
+    if block.size == 0:
+        return block, previous_steer
+
+    steer_scale = float(smooth_cfg.get("steer_scale", 1.0))
+    block[:, 1] *= steer_scale
+
+    mode = str(smooth_cfg.get("block_steer_mode", "mean")).lower()
+    if mode == "raw":
+        targets = block[:, 1].astype(np.float32)
+    elif mode == "first":
+        targets = np.full(block.shape[0], float(block[0, 1]), dtype=np.float32)
+    elif mode == "median":
+        targets = np.full(block.shape[0], float(np.median(block[:, 1])), dtype=np.float32)
+    elif mode == "mean":
+        targets = np.full(block.shape[0], float(np.mean(block[:, 1])), dtype=np.float32)
+    else:
+        raise ValueError(f"Unknown model_action_smoothing.block_steer_mode {mode!r}")
+
+    alpha = float(np.clip(float(smooth_cfg.get("ema_alpha", 0.35)), 0.0, 1.0))
+    rate_limit = float(smooth_cfg.get("steer_rate_limit", 0.015))
+    rate_limit = float("inf") if rate_limit <= 0 else abs(rate_limit)
+    steer_limit = abs(float(smooth_cfg.get("steer_limit", DrivingActionBounds().high[1])))
+    prev = float(smooth_cfg.get("initial_steer", 0.0)) if previous_steer is None else float(previous_steer)
+
+    for idx, target in enumerate(targets):
+        blended = prev + alpha * (float(target) - prev)
+        delta = float(np.clip(blended - prev, -rate_limit, rate_limit))
+        prev = float(np.clip(prev + delta, -steer_limit, steer_limit))
+        block[idx, 1] = prev
+    return block.astype(np.float32), prev
 
 
 def preprocess_pixels(frames: list[np.ndarray], image_size: int, device: torch.device) -> torch.Tensor:
@@ -788,7 +893,9 @@ def run_episode(
     last_collision_count = 0
     last_lane_invasion_count = 0
     blocked_seconds = 0.0
+    red_light_seconds = 0.0
     speed_limit_seconds = 0.0
+    previous_model_steer: float | None = None
     step = 0
     last_sim_time: float | None = None
     last_wall_time: float | None = None
@@ -809,6 +916,7 @@ def run_episode(
         )
     )
     image_queue = listen_queue(camera)
+    monitor_red_lights = red_light_monitor_enabled(eval_cfg)
 
     try:
         if policy == "autopilot":
@@ -818,13 +926,15 @@ def run_episode(
 
         image_history: list[np.ndarray] = []
         action_history: list[np.ndarray] = []
+        model_action_frameskip = 1
         if requires_model(policy):
             if model is None:
                 raise ValueError("Model-backed policy requires a model checkpoint")
             if is_model_policy(policy) and planner is None:
                 raise ValueError("Model planning policy requires a planner")
             idle_action = np.asarray(eval_cfg.get("model_warmup_action", [0.0, 0.0, 1.0]), dtype=np.float32)
-            frameskip = action_dim_to_frameskip(int(model.cfg.action_dim))
+            model_action_frameskip = action_dim_to_frameskip(int(model.cfg.action_dim))
+            frameskip = model_action_frameskip
             for _ in range(int(model.cfg.history_size)):
                 for _raw_step in range(frameskip):
                     ego.apply_control(to_vehicle_control(carla, idle_action, eval_cfg))
@@ -837,6 +947,7 @@ def run_episode(
 
         previous_loc = ego.get_location()
         world_map = world.get_map()
+        perception_filter_state: tuple[float, float] | None = None
         while step < max_steps and acc.route_progress_m < route_length_m:
             current_transform = ego.get_transform()
             pre_lane_offset, pre_heading_error, _ = lane_metrics(carla, world_map, current_transform)
@@ -879,7 +990,19 @@ def run_episode(
                         governed = maybe_govern_model_speed(raw, pre_lane_offset, pre_heading_error, current_speed, eval_cfg)
                         raw[0] = governed[0]
                         raw[2] = governed[2]
-                block_actions = [raw.astype(np.float32) for raw in block]
+                elif policy in {"model_action_steer_speed_keep", "model_action_steer_speed_keep_smooth"}:
+                    governed = lane_keep_action(0.0, 0.0, current_speed, eval_cfg)
+                    for raw in block:
+                        raw[0] = governed[0]
+                        raw[2] = governed[2]
+                    if policy == "model_action_steer_speed_keep_smooth":
+                        block, previous_model_steer = smooth_model_action_block(
+                            block,
+                            previous_steer=previous_model_steer,
+                            eval_cfg=eval_cfg,
+                        )
+                control_frameskip = max(1, int(eval_cfg.get("action_control_frameskip", frameskip)))
+                block_actions = [raw.astype(np.float32) for raw in block[:control_frameskip]]
             elif policy == "model_perception_lane_keep":
                 assert model is not None
                 if model.aux_head is None:
@@ -889,6 +1012,16 @@ def run_episode(
                 aux_lane_offset = float(aux[2])
                 aux_heading_error = float(aux[3])
                 aux_speed = float(aux[0])
+                raw_aux_lane_offset = aux_lane_offset
+                raw_aux_heading_error = aux_heading_error
+                aux_lane_offset, aux_heading_error, perception_filter_state, aux_filter_active = (
+                    filter_perception_lane_state(
+                        aux_lane_offset,
+                        aux_heading_error,
+                        perception_filter_state,
+                        eval_cfg,
+                    )
+                )
                 speed_for_control = (
                     current_speed
                     if bool(eval_cfg.get("perception_lane_keep_use_true_speed", True))
@@ -899,9 +1032,13 @@ def run_episode(
                     "aux_speed_mps": aux_speed,
                     "aux_lane_offset_m": aux_lane_offset,
                     "aux_heading_error_rad": aux_heading_error,
+                    "aux_lane_offset_raw_m": raw_aux_lane_offset,
+                    "aux_heading_error_raw_rad": raw_aux_heading_error,
+                    "aux_lane_filter_active": int(bool(aux_filter_active)),
                     "aux_control_steer": float(action[1]),
                 }
-                block_actions = [action for _ in range(frameskip)]
+                control_frameskip = max(1, int(eval_cfg.get("perception_control_frameskip", frameskip)))
+                block_actions = [action for _ in range(control_frameskip)]
             elif policy == "model_rollout_lane_keep":
                 assert model is not None
                 if model.aux_head is None:
@@ -937,8 +1074,15 @@ def run_episode(
 
             block_raw_actions: list[np.ndarray] = []
             latest_rgb: np.ndarray | None = None
+            red_light_stop_active = False
             for action in block_actions:
                 if action is not None:
+                    red_light_stop_active = (
+                        monitor_red_lights
+                        and bool(eval_cfg.get("red_light_stop", False))
+                        and is_red_traffic_light(carla, ego)
+                    )
+                    action = apply_red_light_stop(action, red_light_stop_active, eval_cfg)
                     applied_action = sanitize_vehicle_action(action, eval_cfg)
                     ego.apply_control(to_vehicle_control(carla, applied_action))
                     block_raw_actions.append(applied_action)
@@ -971,18 +1115,22 @@ def run_episode(
                 acc.add_lane_invasion_events(lane_invasion_delta)
                 last_lane_invasion_count = current_lane_invasion_count
 
+                red_signal_active = monitor_red_lights and is_red_traffic_light(carla, ego)
+                red_light_seconds, red_light = update_red_light_violation(
+                    red_signal_active=red_signal_active,
+                    speed_mps=speed,
+                    previous_seconds=red_light_seconds,
+                    fixed_delta_seconds=fixed_delta,
+                    eval_cfg=eval_cfg,
+                )
+                ignore_blocked = bool(eval_cfg.get("ignore_blocked_at_red_light", False)) and red_signal_active
                 if step * fixed_delta >= float(eval_cfg.get("blocked_grace_seconds", 5.0)) and speed < float(
                     eval_cfg.get("blocked_speed_mps", 0.1)
-                ):
+                ) and not ignore_blocked:
                     blocked_seconds += fixed_delta
                 else:
                     blocked_seconds = 0.0
                 blocked = blocked_seconds >= float(eval_cfg.get("blocked_seconds", 3.0))
-                red_light = bool(
-                    ego.is_at_traffic_light()
-                    and ego.get_traffic_light_state() == carla.TrafficLightState.Red
-                    and speed > float(eval_cfg.get("red_light_speed_threshold_mps", 0.2))
-                )
                 speed_limit_kmh = eval_cfg.get("speed_limit_kmh")
                 if speed_limit_kmh is None:
                     speed_limit_violation = False
@@ -1021,6 +1169,7 @@ def run_episode(
                         "offroad": int(bool(offroad)),
                         "lane_invasion": int(acc.lane_invasion_active),
                         "red_light": int(bool(red_light)),
+                        "red_light_stop": int(bool(red_light_stop_active)),
                         "speed_limit_violation": int(bool(speed_limit_violation)),
                         "blocked": int(bool(blocked)),
                         "collision_count": int(acc.collision_count),
@@ -1057,9 +1206,12 @@ def run_episode(
             if requires_model(policy) and latest_rgb is not None and block_raw_actions:
                 image_history.append(latest_rgb)
                 block = np.asarray(block_raw_actions, dtype=np.float32)
-                if block.shape[0] < frameskip:
-                    block = np.concatenate([block, np.repeat(block[-1:], frameskip - block.shape[0], axis=0)], axis=0)
-                action_history.append(block[:frameskip].reshape(-1).astype(np.float32))
+                if block.shape[0] < model_action_frameskip:
+                    block = np.concatenate(
+                        [block, np.repeat(block[-1:], model_action_frameskip - block.shape[0], axis=0)],
+                        axis=0,
+                    )
+                action_history.append(block[:model_action_frameskip].reshape(-1).astype(np.float32))
 
             if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
                 acc.termination_reason = "collision"

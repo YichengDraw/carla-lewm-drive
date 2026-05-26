@@ -1,0 +1,11 @@
+data:
+  dataset_paths:
+    - data/d1_city_free_drive_lane_teacher/carla_d1_city_free_drive_ft32_fs1_patchlane_tail180_best_lg080_hg060_failure_tail190_lane_teacher_x5.h5
+  frameskip: 1
+  history_size: 3
+  num_preds: 1
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  split_seed: 20260011
+  image_size: 224
