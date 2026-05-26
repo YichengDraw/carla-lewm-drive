@@ -13,11 +13,13 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from carla_lewm_drive.camera import camera_sensor_id, read_camera_image
 from carla_lewm_drive.closed_loop_eval.metrics import DrivingEpisodeMetrics, aggregate_metrics
 from carla_lewm_drive.config import load_yaml
 from carla_lewm_drive.driving_lewm.data import IMAGENET_MEAN, IMAGENET_STD
 from carla_lewm_drive.driving_lewm.model import DrivingLeWM, DrivingLeWMConfig
 from carla_lewm_drive.schema import DrivingActionBounds
+from carla_lewm_drive.semantic_geometry import load_semantic_geometry_lane_model
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,6 +38,7 @@ def parse_args() -> argparse.Namespace:
             "model_action_steer_speed_keep_smooth",
             "model_perception_lane_keep",
             "model_rollout_lane_keep",
+            "semantic_geometry_lane_keep",
             "expert",
             "autopilot",
             "constant",
@@ -43,7 +46,7 @@ def parse_args() -> argparse.Namespace:
         ],
         default=None,
     )
-    parser.add_argument("--baseline", choices=["expert", "autopilot", "lane_keep"], default=None)
+    parser.add_argument("--baseline", choices=["expert", "autopilot", "lane_keep", "semantic_geometry_lane_keep"], default=None)
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--max-episode-seconds", type=float, default=None)
@@ -88,6 +91,8 @@ def normalize_policy(policy: str | None) -> str:
         return "model_perception_lane_keep"
     if value in {"model_rollout_lane_keep", "rollout_lane_keep"}:
         return "model_rollout_lane_keep"
+    if value in {"semantic_geometry_lane_keep", "semantic_lane_keep", "geometry_lane_keep"}:
+        return "semantic_geometry_lane_keep"
     if value in {"expert", "autopilot"}:
         return "autopilot"
     if value == "constant":
@@ -417,6 +422,17 @@ def run_dry_eval(cfg: dict[str, Any], checkpoint_path: Path | None, policy: str)
                 "action_head_available": not bool(getattr(model, "_checkpoint_missing_action_head", False)),
             }
         )
+        guard_cfg = dict(eval_cfg.get("semantic_geometry_guard", {}))
+        if bool(guard_cfg.get("enabled", False)):
+            model_path = eval_cfg.get("semantic_geometry_model_path")
+            if not model_path:
+                raise ValueError("semantic_geometry_guard requires eval.semantic_geometry_model_path")
+            out["semantic_geometry_model_path"] = str(model_path)
+    elif policy == "semantic_geometry_lane_keep":
+        model_path = eval_cfg.get("semantic_geometry_model_path")
+        if not model_path:
+            raise ValueError("semantic_geometry_lane_keep requires eval.semantic_geometry_model_path")
+        out["semantic_geometry_model_path"] = str(model_path)
     return out
 
 
@@ -494,6 +510,8 @@ def write_action_trace(output_dir: Path, episode_idx: int, rows: list[dict[str, 
         "aux_heading_error_raw_rad",
         "aux_lane_filter_active",
         "aux_control_steer",
+        "semantic_geometry_guard_active",
+        "semantic_geometry_guard_applied",
         "offroad",
         "lane_invasion",
         "red_light",
@@ -518,7 +536,7 @@ def camera_transform(carla, cfg: dict[str, Any]):
 
 
 def make_camera(carla, world, ego, cfg: dict[str, Any]):
-    bp = world.get_blueprint_library().find("sensor.camera.rgb")
+    bp = world.get_blueprint_library().find(camera_sensor_id(cfg))
     bp.set_attribute("image_size_x", str(int(cfg["camera"]["image_width"])))
     bp.set_attribute("image_size_y", str(int(cfg["camera"]["image_height"])))
     bp.set_attribute("fov", str(float(cfg["camera"]["fov"])))
@@ -556,11 +574,16 @@ def listen_queue(sensor):
     return image_queue
 
 
-def wait_rgb(carla_world, image_queue, timeout_s: float) -> np.ndarray:
-    return wait_rgb_packet(carla_world, image_queue, timeout_s)[0]
+def wait_rgb(carla_world, image_queue, timeout_s: float, cfg: dict[str, Any] | None = None) -> np.ndarray:
+    return wait_rgb_packet(carla_world, image_queue, timeout_s, cfg)[0]
 
 
-def wait_rgb_packet(carla_world, image_queue, timeout_s: float) -> tuple[np.ndarray, int, float]:
+def wait_rgb_packet(
+    carla_world,
+    image_queue,
+    timeout_s: float,
+    cfg: dict[str, Any] | None = None,
+) -> tuple[np.ndarray, int, float]:
     while True:
         try:
             image_queue.get_nowait()
@@ -570,12 +593,11 @@ def wait_rgb_packet(carla_world, image_queue, timeout_s: float) -> tuple[np.ndar
     image = image_queue.get(timeout=timeout_s)
     while image.frame < frame_id:
         image = image_queue.get(timeout=timeout_s)
-    return read_rgb(image), int(image.frame), float(image.timestamp)
+    return read_camera_image(image, cfg), int(image.frame), float(image.timestamp)
 
 
 def read_rgb(image) -> np.ndarray:
-    arr = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(image.height, image.width, 4)
-    return arr[:, :, :3][:, :, ::-1].copy()
+    return read_camera_image(image, {"camera": {"type": "rgb"}})
 
 
 def lane_metrics(carla, world_map, transform) -> tuple[float, float, float]:
@@ -623,6 +645,47 @@ def force_green_lights(carla, world, enabled: bool) -> None:
 
 def is_red_traffic_light(carla, ego) -> bool:
     return bool(ego.is_at_traffic_light() and ego.get_traffic_light_state() == carla.TrafficLightState.Red)
+
+
+def is_red_traffic_light_ahead(carla, world, ego, eval_cfg: dict[str, Any]) -> bool:
+    lookahead_m = float(eval_cfg.get("red_light_lookahead_m", 0.0))
+    if lookahead_m <= 0.0:
+        return False
+    lateral_limit_m = float(eval_cfg.get("red_light_lateral_limit_m", 12.0))
+    min_forward_dot = float(eval_cfg.get("red_light_min_forward_dot", 0.2))
+    transform = ego.get_transform()
+    ego_loc = transform.location
+    forward = transform.get_forward_vector()
+    actors = world.get_actors().filter("traffic.traffic_light*")
+    for light in actors:
+        try:
+            if light.get_state() != carla.TrafficLightState.Red:
+                continue
+            trigger_loc = light.get_transform().transform(light.trigger_volume.location)
+        except Exception:
+            try:
+                if light.state != carla.TrafficLightState.Red:
+                    continue
+            except Exception:
+                continue
+            trigger_loc = light.get_transform().location
+        dx = float(trigger_loc.x - ego_loc.x)
+        dy = float(trigger_loc.y - ego_loc.y)
+        dz = float(trigger_loc.z - ego_loc.z)
+        distance = float(np.sqrt(dx * dx + dy * dy + dz * dz))
+        if distance <= 1e-6 or distance > lookahead_m:
+            continue
+        forward_distance = dx * float(forward.x) + dy * float(forward.y) + dz * float(forward.z)
+        if forward_distance <= 0.0 or forward_distance / distance < min_forward_dot:
+            continue
+        lateral_sq = max(0.0, distance * distance - forward_distance * forward_distance)
+        if float(np.sqrt(lateral_sq)) <= lateral_limit_m:
+            return True
+    return False
+
+
+def should_stop_for_red_light(carla, world, ego, eval_cfg: dict[str, Any]) -> bool:
+    return is_red_traffic_light(carla, ego) or is_red_traffic_light_ahead(carla, world, ego, eval_cfg)
 
 
 def red_light_monitor_enabled(eval_cfg: dict[str, Any]) -> bool:
@@ -748,6 +811,56 @@ def apply_red_light_stop(action: np.ndarray, red_light_active: bool, eval_cfg: d
     return out
 
 
+def apply_semantic_geometry_guard(
+    block: np.ndarray,
+    rgb: np.ndarray,
+    semantic_lane_model: Any,
+    previous_state: tuple[float, float] | None,
+    eval_cfg: dict[str, Any],
+) -> tuple[np.ndarray, tuple[float, float] | None, dict[str, float | int]]:
+    guard_cfg = dict(eval_cfg.get("semantic_geometry_guard", {}))
+    if not bool(guard_cfg.get("enabled", False)):
+        return block, previous_state, {}
+    semantic_lane = semantic_lane_model.predict(rgb)
+    raw_lane_offset = float(semantic_lane[0])
+    raw_heading_error = float(semantic_lane[1])
+    lane_offset, heading_error, next_state, filter_active = filter_perception_lane_state(
+        raw_lane_offset,
+        raw_heading_error,
+        previous_state,
+        eval_cfg,
+    )
+    guard_steer = lane_keep_steer(lane_offset, heading_error, eval_cfg)
+    active = abs(lane_offset) >= abs(float(guard_cfg.get("active_lane_abs_m", 0.18))) or abs(
+        heading_error
+    ) >= abs(float(guard_cfg.get("active_heading_abs_rad", 0.04)))
+    blend = float(np.clip(float(guard_cfg.get("blend", 1.0)), 0.0, 1.0))
+    conflict_only = bool(guard_cfg.get("conflict_only", False))
+    conflict_deadband = abs(float(guard_cfg.get("conflict_deadband", 0.01)))
+    guarded = np.asarray(block, dtype=np.float32).copy()
+    applied = False
+    if active:
+        for idx in range(guarded.shape[0]):
+            model_steer = float(guarded[idx, 1])
+            conflict = model_steer * guard_steer < -conflict_deadband
+            weak = abs(model_steer) < abs(float(guard_cfg.get("min_model_steer_abs", 0.02)))
+            if (not conflict_only) or conflict or weak:
+                guarded[idx, 1] = (1.0 - blend) * model_steer + blend * guard_steer
+                applied = True
+    aux = {
+        "aux_speed_mps": 0.0,
+        "aux_lane_offset_m": lane_offset,
+        "aux_heading_error_rad": heading_error,
+        "aux_lane_offset_raw_m": raw_lane_offset,
+        "aux_heading_error_raw_rad": raw_heading_error,
+        "aux_lane_filter_active": int(bool(filter_active)),
+        "aux_control_steer": float(guard_steer),
+        "semantic_geometry_guard_active": int(bool(active)),
+        "semantic_geometry_guard_applied": int(bool(applied)),
+    }
+    return guarded, next_state, aux
+
+
 def flatten_model_action_to_block(action_flat: np.ndarray, action_dim: int) -> np.ndarray:
     action_flat = np.asarray(action_flat, dtype=np.float32).reshape(-1)
     if action_flat.shape[0] != int(action_dim):
@@ -838,7 +951,11 @@ def maybe_store_frame(
         frame_dir.mkdir(parents=True, exist_ok=True)
         from PIL import Image
 
-        Image.fromarray(rgb).save(frame_dir / f"step_{step:05d}.jpg", quality=90)
+        frame_format = str(eval_cfg.get("frame_format", "jpg")).lower().lstrip(".")
+        if frame_format not in {"jpg", "jpeg", "png"}:
+            raise ValueError(f"Unsupported frame_format={frame_format!r}; expected 'jpg', 'jpeg', or 'png'")
+        save_kwargs = {"quality": 90} if frame_format in {"jpg", "jpeg"} else {}
+        Image.fromarray(rgb).save(frame_dir / f"step_{step:05d}.{frame_format}", **save_kwargs)
 
 
 def write_contact_sheet(output_dir: Path, frames: list[tuple[np.ndarray, str]]) -> Path | None:
@@ -927,6 +1044,7 @@ def run_episode(
         image_history: list[np.ndarray] = []
         action_history: list[np.ndarray] = []
         model_action_frameskip = 1
+        semantic_lane_model: Any | None = None
         if requires_model(policy):
             if model is None:
                 raise ValueError("Model-backed policy requires a model checkpoint")
@@ -938,12 +1056,24 @@ def run_episode(
             for _ in range(int(model.cfg.history_size)):
                 for _raw_step in range(frameskip):
                     ego.apply_control(to_vehicle_control(carla, idle_action, eval_cfg))
-                    rgb = wait_rgb(world, image_queue, timeout_s)
+                    rgb = wait_rgb(world, image_queue, timeout_s, cfg)
                 image_history.append(rgb)
                 action_history.append(expand_action_to_model_dim(idle_action, int(model.cfg.action_dim)))
+            current_rgb = image_history[-1]
+            guard_cfg = dict(eval_cfg.get("semantic_geometry_guard", {}))
+            if bool(guard_cfg.get("enabled", False)):
+                model_path = eval_cfg.get("semantic_geometry_model_path")
+                if not model_path:
+                    raise ValueError("semantic_geometry_guard requires eval.semantic_geometry_model_path")
+                semantic_lane_model = load_semantic_geometry_lane_model(model_path)
         else:
             frameskip = 1
-            wait_rgb(world, image_queue, timeout_s)
+            current_rgb = wait_rgb(world, image_queue, timeout_s, cfg)
+            if policy == "semantic_geometry_lane_keep":
+                model_path = eval_cfg.get("semantic_geometry_model_path")
+                if not model_path:
+                    raise ValueError("semantic_geometry_lane_keep requires eval.semantic_geometry_model_path")
+                semantic_lane_model = load_semantic_geometry_lane_model(model_path)
 
         previous_loc = ego.get_location()
         world_map = world.get_map()
@@ -1000,6 +1130,14 @@ def run_episode(
                             block,
                             previous_steer=previous_model_steer,
                             eval_cfg=eval_cfg,
+                        )
+                    if semantic_lane_model is not None:
+                        block, perception_filter_state, perception_aux = apply_semantic_geometry_guard(
+                            block,
+                            current_rgb,
+                            semantic_lane_model,
+                            perception_filter_state,
+                            eval_cfg,
                         )
                 control_frameskip = max(1, int(eval_cfg.get("action_control_frameskip", frameskip)))
                 block_actions = [raw.astype(np.float32) for raw in block[:control_frameskip]]
@@ -1063,6 +1201,33 @@ def run_episode(
                     "aux_control_steer": float(action[1]),
                 }
                 block_actions = [action for _ in range(frameskip)]
+            elif policy == "semantic_geometry_lane_keep":
+                if semantic_lane_model is None:
+                    raise ValueError("semantic_geometry_lane_keep requires a loaded semantic geometry model")
+                semantic_lane = semantic_lane_model.predict(current_rgb)
+                aux_lane_offset = float(semantic_lane[0])
+                aux_heading_error = float(semantic_lane[1])
+                raw_aux_lane_offset = aux_lane_offset
+                raw_aux_heading_error = aux_heading_error
+                aux_lane_offset, aux_heading_error, perception_filter_state, aux_filter_active = (
+                    filter_perception_lane_state(
+                        aux_lane_offset,
+                        aux_heading_error,
+                        perception_filter_state,
+                        eval_cfg,
+                    )
+                )
+                action = lane_keep_action(aux_lane_offset, aux_heading_error, current_speed, eval_cfg)
+                perception_aux = {
+                    "aux_speed_mps": float(current_speed),
+                    "aux_lane_offset_m": aux_lane_offset,
+                    "aux_heading_error_rad": aux_heading_error,
+                    "aux_lane_offset_raw_m": raw_aux_lane_offset,
+                    "aux_heading_error_raw_rad": raw_aux_heading_error,
+                    "aux_lane_filter_active": int(bool(aux_filter_active)),
+                    "aux_control_steer": float(action[1]),
+                }
+                block_actions = [action]
             elif policy == "lane_keep":
                 action = lane_keep_action(pre_lane_offset, pre_heading_error, current_speed, eval_cfg)
                 block_actions = [action]
@@ -1080,13 +1245,13 @@ def run_episode(
                     red_light_stop_active = (
                         monitor_red_lights
                         and bool(eval_cfg.get("red_light_stop", False))
-                        and is_red_traffic_light(carla, ego)
+                        and should_stop_for_red_light(carla, world, ego, eval_cfg)
                     )
                     action = apply_red_light_stop(action, red_light_stop_active, eval_cfg)
                     applied_action = sanitize_vehicle_action(action, eval_cfg)
                     ego.apply_control(to_vehicle_control(carla, applied_action))
                     block_raw_actions.append(applied_action)
-                rgb, frame_id, sim_time = wait_rgb_packet(world, image_queue, timeout_s)
+                rgb, frame_id, sim_time = wait_rgb_packet(world, image_queue, timeout_s, cfg)
                 wall_time = time.perf_counter()
                 latest_rgb = rgb
                 step += 1
@@ -1123,7 +1288,9 @@ def run_episode(
                     fixed_delta_seconds=fixed_delta,
                     eval_cfg=eval_cfg,
                 )
-                ignore_blocked = bool(eval_cfg.get("ignore_blocked_at_red_light", False)) and red_signal_active
+                ignore_blocked = bool(eval_cfg.get("ignore_blocked_at_red_light", False)) and (
+                    red_signal_active or red_light_stop_active
+                )
                 if step * fixed_delta >= float(eval_cfg.get("blocked_grace_seconds", 5.0)) and speed < float(
                     eval_cfg.get("blocked_speed_mps", 0.1)
                 ) and not ignore_blocked:
@@ -1212,6 +1379,8 @@ def run_episode(
                         axis=0,
                     )
                 action_history.append(block[:model_action_frameskip].reshape(-1).astype(np.float32))
+            if latest_rgb is not None:
+                current_rgb = latest_rgb
 
             if bool(eval_cfg.get("stop_on_collision", True)) and acc.collision_count > 0:
                 acc.termination_reason = "collision"

@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import torch
 
+from carla_lewm_drive.camera import camera_sensor_id, read_camera_image
 from carla_lewm_drive.closed_loop_eval.evaluate import (
     CEMPlanner,
     apply_cli_overrides,
@@ -63,6 +64,25 @@ class DummyModel:
     def rollout_aux(self, pixels, actions):
         self.seen_shapes.append(tuple(actions.shape))
         return torch.tensor([[5.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]], device=actions.device)
+
+
+class FakeImage:
+    def __init__(self, bgra: np.ndarray) -> None:
+        self.height, self.width = bgra.shape[:2]
+        self.raw_data = bgra.tobytes()
+
+
+def test_camera_sensor_id_supports_rgb_and_semantic_modes():
+    assert camera_sensor_id({"camera": {"type": "rgb"}}) == "sensor.camera.rgb"
+    assert camera_sensor_id({"camera": {"type": "semantic_segmentation"}}) == "sensor.camera.semantic_segmentation"
+
+
+def test_read_camera_image_keeps_rgb_default_bgra_to_rgb_behavior():
+    bgra = np.asarray([[[1, 2, 3, 255]]], dtype=np.uint8)
+
+    image = read_camera_image(FakeImage(bgra), {})
+
+    assert image.tolist() == [[[3, 2, 1]]]
 
 
 def test_expand_action_to_model_dim_repeats_raw_control_for_frameskip():
@@ -488,6 +508,25 @@ def test_lane_keep_policy_dry_run_does_not_require_checkpoint(tmp_path):
     assert out["route_cap_m"] == 80.0
 
 
+def test_semantic_geometry_lane_keep_dry_run_does_not_require_checkpoint(tmp_path):
+    model_path = tmp_path / "semantic_geometry.json"
+    cfg = {
+        "eval": {
+            "policy": "semantic_geometry_lane_keep",
+            "semantic_geometry_model_path": str(model_path),
+            "eval_episodes": 1,
+            "route_cap_m": 80.0,
+            "output_dir": str(tmp_path),
+        }
+    }
+
+    out = run_dry_eval(cfg, checkpoint_path=None, policy=normalize_policy("semantic_lane_keep"))
+
+    assert out["status"] == "config_loaded"
+    assert out["policy"] == "semantic_geometry_lane_keep"
+    assert out["semantic_geometry_model_path"] == str(model_path)
+
+
 def test_model_action_policy_normalizes_to_model_backed_action():
     assert normalize_policy("action") == "model_action"
     assert normalize_policy("model_action_lane_keep") == "model_action_lane_keep"
@@ -495,9 +534,11 @@ def test_model_action_policy_normalizes_to_model_backed_action():
     assert normalize_policy("model_steer_speed_keep_smooth") == "model_action_steer_speed_keep_smooth"
     assert normalize_policy("perception_lane_keep") == "model_perception_lane_keep"
     assert normalize_policy("rollout_lane_keep") == "model_rollout_lane_keep"
+    assert normalize_policy("geometry_lane_keep") == "semantic_geometry_lane_keep"
     assert requires_model("model_action_steer_speed_keep") is True
     assert requires_model("model_action_steer_speed_keep_smooth") is True
     assert requires_model("model_rollout_lane_keep") is True
+    assert requires_model("semantic_geometry_lane_keep") is False
 
 
 def test_checkpoint_argument_preserves_configured_action_policy():

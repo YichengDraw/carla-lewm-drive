@@ -13,6 +13,13 @@ from carla_lewm_drive.carla_collect.collect_dataset import (
     select_recovery_perturbation,
     write_hdf5,
 )
+from carla_lewm_drive.camera import read_camera_image, semantic_tags_to_rgb
+
+
+class FakeImage:
+    def __init__(self, bgra: np.ndarray) -> None:
+        self.height, self.width = bgra.shape[:2]
+        self.raw_data = bgra.tobytes()
 
 
 def empty_output() -> dict[str, list]:
@@ -55,6 +62,28 @@ def test_select_recovery_perturbation_cycles_offsets_then_yaw():
     assert select_recovery_perturbation(0, cfg) == RecoveryPerturbation(0.0, 0.0)
     assert select_recovery_perturbation(2, cfg) == RecoveryPerturbation(0.5, 0.0)
     assert select_recovery_perturbation(3, cfg) == RecoveryPerturbation(0.0, 4.0)
+
+
+def test_semantic_tags_to_rgb_maps_driveable_line_and_obstacle_channels():
+    tags = np.asarray([[1, 24, 2, 11]], dtype=np.uint8)
+
+    mapped = semantic_tags_to_rgb(tags)
+
+    assert mapped.tolist() == [[
+        [255, 0, 0],
+        [0, 255, 0],
+        [0, 0, 255],
+        [0, 0, 0],
+    ]]
+
+
+def test_read_camera_image_supports_semantic_red_tag_channel():
+    bgra = np.zeros((1, 3, 4), dtype=np.uint8)
+    bgra[0, :, 2] = np.asarray([1, 24, 14], dtype=np.uint8)
+
+    image = read_camera_image(FakeImage(bgra), {"camera": {"type": "semantic"}})
+
+    assert image.tolist() == [[[255, 0, 0], [0, 255, 0], [0, 0, 255]]]
 
 
 def test_lane_keep_action_corrects_offset_and_limits_speed():

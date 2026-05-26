@@ -11,6 +11,7 @@ from typing import Any
 import h5py
 import numpy as np
 
+from carla_lewm_drive.camera import camera_sensor_id, read_camera_image
 from carla_lewm_drive.config import load_yaml
 
 
@@ -99,7 +100,7 @@ def camera_transform(carla, cfg: dict[str, Any]):
 
 
 def make_camera(carla, world, ego, cfg: dict[str, Any]):
-    bp = world.get_blueprint_library().find("sensor.camera.rgb")
+    bp = world.get_blueprint_library().find(camera_sensor_id(cfg))
     bp.set_attribute("image_size_x", str(int(cfg["camera"]["image_width"])))
     bp.set_attribute("image_size_y", str(int(cfg["camera"]["image_height"])))
     bp.set_attribute("fov", str(float(cfg["camera"]["fov"])))
@@ -224,8 +225,7 @@ def listen_queue(sensor):
 
 
 def read_rgb(image) -> np.ndarray:
-    arr = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(image.height, image.width, 4)
-    return arr[:, :, :3][:, :, ::-1].copy()
+    return read_camera_image(image, {"camera": {"type": "rgb"}})
 
 
 def lane_metrics(carla, world_map, transform) -> tuple[float, float, float]:
@@ -495,7 +495,7 @@ def run_collection(cfg: dict[str, Any]) -> Path:
                 state_vec = np.array([loc.x, loc.y, transform.rotation.yaw, speed, progress, lane_offset], dtype=np.float32)
                 proprio_vec = np.array([speed, lane_offset, heading_error], dtype=np.float32)
 
-                ep_pixels.append(read_rgb(image))
+                ep_pixels.append(read_camera_image(image, cfg))
                 ep_actions.append(action)
                 ep_state.append(state_vec)
                 ep_proprio.append(proprio_vec)

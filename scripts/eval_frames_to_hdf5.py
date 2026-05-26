@@ -43,7 +43,13 @@ def read_trace(path: Path) -> list[dict[str, str]]:
 
 
 def frame_path(eval_dir: Path, episode_idx: int, step: int) -> Path:
-    return eval_dir / "frames" / f"episode_{episode_idx:03d}" / f"step_{step:05d}.jpg"
+    frame_dir = eval_dir / "frames" / f"episode_{episode_idx:03d}"
+    stem = f"step_{step:05d}"
+    for suffix in (".png", ".jpg", ".jpeg"):
+        candidate = frame_dir / f"{stem}{suffix}"
+        if candidate.exists():
+            return candidate
+    return frame_dir / f"{stem}.jpg"
 
 
 def route_for_episode(eval_cfg: dict[str, Any], episode_idx: int) -> int:

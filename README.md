@@ -19,6 +19,15 @@ The project is intentionally narrow: start with an easy single-ego CARLA setting
 
 ## Current Evidence
 
+Status after the D1 route6 semantic-action pass:
+
+- RF semantic-geometry lane controller solved the simplified route6 task: forced-green 1km and redlight 1km both reached 1000m, 100.0 mini score, with 0 lane/offroad/collision/red/blocked/speed infractions.
+- FT44/FT45/FT46 pure semantic action distillation improved offline action loss but did not solve long closed-loop control: FT46 best reached `456.32m`, FT46 last reached `458.99m`, and both failed by lane invasion.
+- FT46 training run: [`d1_tiny_h1_fs1_route6_semantic_action_semgeom_distill_ft46_balanced_tail_1400`](https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h1_fs1_route6_semantic_action_semgeom_distill_ft46_balanced_tail_1400-20260527-053855-13cc8c8c), best checkpoint at step `1200`, test/action_steer_loss `0.0160`.
+- Final achieved policy: FT46 action used as a residual inside an always-on semantic-geometry guard, with steer `0.15 * LeWM action + 0.85 * semantic geometry controller`.
+- Forced-green hybrid result: `outputs/d1_eval_ft46last_alwayson_hybrid_route6_1km_20260527_060026`, route complete `1000m`, mini score `100.0`, all infraction counts `0`.
+- Redlight hybrid result: `outputs/d1_eval_ft46last_alwayson_hybrid_redlight_route6_1km_20260527_061347`, route complete `1000m`, mini score `100.0`, all infraction counts `0`; trace analysis found `7256` red-light-stop frames across `14` stop segments, so the redlight pass included actual stopping behavior.
+
 Status after the first D0 execution pass:
 
 - `D0-smoke`: 20 accepted episodes, 12,000 frames, strict QC pass, 0 collision/off-road/red-light/blocked frames.
@@ -44,7 +53,7 @@ Status after the first D0 execution pass:
 - The conflict-aware run required adding the same CEM planner block to `eval_d0_model_action_speedgate.yaml` and `eval_d0_model_action_lane_keep_speedgate.yaml`; without that, the action-policy evaluator failed before closed-loop scoring.
 - Closed-loop candidate comparison on the conflict-aware run: total-loss `best.pt` reached `22.14m` pure and `22.94m` lane-keep; action-best step `4350` reached `25.06m` pure and `25.00m` lane-keep; pred-action-best step `5800` reached `20.67m` pure and `20.87m` lane-keep. All six had zero collision/off-road/red-light/blocked events but failed the 200m target because each triggered one speed-limit violation.
 
-Interpretation: the data and training pipeline are usable, and the tiny/small LeWM variants can satisfy a very simplified model-driven D0 target up to 190m. Delta-progress and predicted-aux training improved offline learning, but scaling from tiny to small did not solve steering or speed compliance. The action-prior head learned useful controls only after the evaluator enforced the same throttle/brake exclusivity that exists in the dataset. Conflict-aware action training improved the best pure action distance slightly, but it did not solve speed compliance. The current 200m pass remains a governed hybrid result. The next task is D1 city free-drive: no other vehicles, distance before road-safety failures as the primary metric, red lights second, speed-limit violations as soft logged penalties in the first pass.
+Interpretation: the data and training pipeline are usable, and the simplified D1 city target is achievable with camera-only semantic geometry plus a constrained LeWM action residual. Pure tiny ViT action distillation still drifts under closed-loop covariate shift, even when offline action loss improves, so the credible current result is a hybrid/residual controller rather than a pure LeWM action policy. The next useful research step is to train the LeWM to predict the geometry-controller residual directly, then reduce the geometry blend while keeping the same 1km safety gate.
 
 ## Installation
 

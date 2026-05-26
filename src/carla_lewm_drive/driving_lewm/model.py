@@ -101,6 +101,13 @@ class DrivingLeWMConfig:
     aux_lane_patch_hidden_dim: int = 0
     aux_lane_patch_dropout: float = 0.1
     aux_lane_patch_zero_init: bool = True
+    use_semantic_geometry_aux_head: bool = False
+    semantic_geometry_aux_mode: str = "replace"
+    semantic_geometry_rows: tuple[int, ...] = (96, 112, 128, 144, 160, 176, 192, 208)
+    semantic_geometry_band: int = 5
+    semantic_geometry_hidden_dim: int = 128
+    semantic_geometry_dropout: float = 0.05
+    semantic_geometry_zero_init: bool = False
 
 
 class ActionEmbedder(nn.Module):
@@ -195,6 +202,78 @@ class SpatialPatchLaneHead(nn.Module):
         return self.head(pooled)
 
 
+class SemanticGeometryAuxHead(nn.Module):
+    def __init__(
+        self,
+        *,
+        rows: tuple[int, ...] | list[int],
+        band: int,
+        image_size: int,
+        hidden_dim: int,
+        dropout: float,
+        zero_init: bool,
+    ) -> None:
+        super().__init__()
+        self.rows = tuple(int(row) for row in rows)
+        self.band = max(0, int(band))
+        self.image_size = int(image_size)
+        feature_dim = len(self.rows) * 3 * 4
+        if int(hidden_dim) > 0:
+            self.head = nn.Sequential(
+                nn.LayerNorm(feature_dim),
+                nn.Linear(feature_dim, int(hidden_dim)),
+                nn.GELU(),
+                nn.Dropout(float(dropout)),
+                nn.Linear(int(hidden_dim), 2),
+            )
+        else:
+            self.head = nn.Sequential(nn.LayerNorm(feature_dim), nn.Linear(feature_dim, 2))
+        if zero_init:
+            final = self.head[-1]
+            nn.init.zeros_(final.weight)
+            nn.init.zeros_(final.bias)
+
+    @staticmethod
+    def _semantic_scores(pixels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        mean = pixels.new_tensor([0.485, 0.456, 0.406]).view(1, 1, 3, 1, 1)
+        std = pixels.new_tensor([0.229, 0.224, 0.225]).view(1, 1, 3, 1, 1)
+        rgb = (pixels.float() * std + mean).clamp(0.0, 1.0)
+        red = rgb[:, :, 0]
+        green = rgb[:, :, 1]
+        blue = rgb[:, :, 2]
+        roadline = F.relu(green - torch.maximum(red, blue))
+        road = F.relu(red - torch.maximum(green, blue))
+        obstacle = F.relu(blue - torch.maximum(red, green))
+        return roadline, road, obstacle
+
+    def _row_features(self, score: torch.Tensor, row: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        h = score.shape[-2]
+        w = score.shape[-1]
+        scaled_row = int(round(float(row) * float(h) / max(1.0, float(self.image_size))))
+        y0 = max(0, scaled_row - self.band)
+        y1 = min(h, scaled_row + self.band + 1)
+        band_score = score[..., y0:y1, :].sum(dim=-2)
+        mass = band_score.sum(dim=-1).clamp_min(1e-6)
+        xs = torch.linspace(-1.0, 1.0, w, device=score.device, dtype=score.dtype)
+        centroid = (band_score * xs).sum(dim=-1) / mass
+        left_mass = band_score[..., : w // 2].sum(dim=-1)
+        right_mass = band_score[..., w // 2 :].sum(dim=-1)
+        balance = (left_mass - right_mass) / mass
+        spread = (band_score * (xs - centroid.unsqueeze(-1)).square()).sum(dim=-1) / mass
+        log_mass = torch.log1p(mass)
+        return centroid, balance, spread, log_mass
+
+    def forward(self, pixels: torch.Tensor) -> torch.Tensor:
+        if pixels.ndim != 5:
+            raise ValueError(f"Expected pixels with shape [B,T,C,H,W], got {tuple(pixels.shape)}")
+        score_maps = self._semantic_scores(pixels)
+        features = []
+        for row in self.rows:
+            for score in score_maps:
+                features.extend(self._row_features(score, row))
+        return self.head(torch.stack(features, dim=-1))
+
+
 class DrivingLeWM(nn.Module):
     def __init__(self, cfg: DrivingLeWMConfig) -> None:
         super().__init__()
@@ -266,6 +345,23 @@ class DrivingLeWM(nn.Module):
                 zero_init=bool(cfg.aux_lane_patch_zero_init),
             )
             if patch_mode != "off"
+            else None
+        )
+        geometry_mode = str(cfg.semantic_geometry_aux_mode).lower()
+        if geometry_mode not in {"replace", "residual"}:
+            raise ValueError("semantic_geometry_aux_mode must be one of: replace, residual")
+        if cfg.use_semantic_geometry_aux_head and self.aux_head is None:
+            raise ValueError("use_semantic_geometry_aux_head requires use_aux_head=true")
+        self.semantic_geometry_aux_head = (
+            SemanticGeometryAuxHead(
+                rows=cfg.semantic_geometry_rows,
+                band=cfg.semantic_geometry_band,
+                image_size=cfg.image_size,
+                hidden_dim=cfg.semantic_geometry_hidden_dim,
+                dropout=cfg.semantic_geometry_dropout,
+                zero_init=cfg.semantic_geometry_zero_init,
+            )
+            if cfg.use_semantic_geometry_aux_head
             else None
         )
         action_head_input_dim = cfg.embed_dim
@@ -345,6 +441,33 @@ class DrivingLeWM(nn.Module):
         else:
             raise ValueError("aux_lane_patch_mode must be one of: off, residual, replace")
         return out
+
+    def fuse_semantic_geometry_aux(self, aux: torch.Tensor, pixels: torch.Tensor) -> torch.Tensor:
+        if self.semantic_geometry_aux_head is None:
+            return aux
+        squeeze_time = False
+        if aux.ndim == 2:
+            aux_in = aux.unsqueeze(1)
+            squeeze_time = True
+        else:
+            aux_in = aux
+        if pixels.ndim != 5:
+            raise ValueError(f"Expected pixels with shape [B,T,C,H,W], got {tuple(pixels.shape)}")
+        if pixels.shape[1] != aux_in.shape[1]:
+            if pixels.shape[1] == 1:
+                pixels = pixels.expand(pixels.shape[0], aux_in.shape[1], *pixels.shape[2:])
+            else:
+                raise ValueError(f"Semantic geometry pixels T={pixels.shape[1]} does not match aux T={aux_in.shape[1]}")
+        geometry_lane = self.semantic_geometry_aux_head(pixels)
+        out = aux_in.clone()
+        mode = str(self.cfg.semantic_geometry_aux_mode).lower()
+        if mode == "replace":
+            out[..., 2:4] = geometry_lane
+        elif mode == "residual":
+            out[..., 2:4] = out[..., 2:4] + geometry_lane
+        else:
+            raise ValueError("semantic_geometry_aux_mode must be one of: replace, residual")
+        return out.squeeze(1) if squeeze_time else out
 
     def apply_route_condition(self, emb: torch.Tensor, route_id: torch.Tensor | int | None) -> torch.Tensor:
         if self.route_embed is None:
@@ -463,7 +586,8 @@ class DrivingLeWM(nn.Module):
         }
         if self.aux_head is not None:
             aux = self.fuse_temporal_aux(self.aux_head(emb), emb)
-            out["aux"] = self.fuse_patch_lane_aux(aux, patch_tokens)
+            aux = self.fuse_patch_lane_aux(aux, patch_tokens)
+            out["aux"] = self.fuse_semantic_geometry_aux(aux, batch["pixels"])
             out["pred_aux"] = self.aux_head(pred)
         return out
 
@@ -989,4 +1113,5 @@ class DrivingLeWM(nn.Module):
         emb = self.apply_route_condition(emb, route_id)
         aux_all = self.fuse_temporal_aux(self.aux_head(emb), emb)
         aux = aux_all[:, -1]
-        return self.fuse_patch_lane_aux(aux, patch_tokens[:, -1])
+        aux = self.fuse_patch_lane_aux(aux, patch_tokens[:, -1])
+        return self.fuse_semantic_geometry_aux(aux, pixels[:, -1:])

@@ -68,6 +68,7 @@ class CarlaSequenceDataset(Dataset):
         num_preds: int,
         image_size: int = 224,
         episodes: Iterable[int] | None = None,
+        teacher_action_key: str = "teacher_action",
     ) -> None:
         self.dataset_path = Path(dataset_path)
         self.frameskip = int(frameskip)
@@ -76,6 +77,7 @@ class CarlaSequenceDataset(Dataset):
         self.num_steps = self.history_size + self.num_preds
         self.span = self.num_steps * self.frameskip
         self.image_size = int(image_size)
+        self.teacher_action_key = str(teacher_action_key)
         self._h5: h5py.File | None = None
 
         with h5py.File(self.dataset_path, "r") as f:
@@ -133,8 +135,8 @@ class CarlaSequenceDataset(Dataset):
 
         actions = np.asarray(h5["action"][raw_indices], dtype=np.float32)
         action = torch.from_numpy(actions.reshape(self.num_steps, self.frameskip * self.action_dim))
-        if "teacher_action" in h5:
-            teacher_actions = np.asarray(h5["teacher_action"][raw_indices], dtype=np.float32)
+        if self.teacher_action_key in h5:
+            teacher_actions = np.asarray(h5[self.teacher_action_key][raw_indices], dtype=np.float32)
             teacher_action = torch.from_numpy(teacher_actions.reshape(self.num_steps, self.frameskip * self.action_dim))
             teacher_action_mask = torch.ones((self.num_steps, 1), dtype=torch.float32)
         else:
@@ -171,6 +173,7 @@ def _make_single_splits(dataset_path: str | Path, cfg: dict, *, split_seed: int)
         "history_size": int(cfg["history_size"]),
         "num_preds": int(cfg["num_preds"]),
         "image_size": int(cfg["image_size"]),
+        "teacher_action_key": str(cfg.get("teacher_action_key", "teacher_action")),
     }
     with h5py.File(dataset_path, "r") as f:
         num_episodes = int(len(f["ep_len"]))

@@ -15,7 +15,7 @@ HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CARLA-LeWM 1km 城市驾驶计划</title>
+  <title>CARLA-LeWM 1km 城市驾驶报告</title>
   <style>
     :root {
       color-scheme: light;
@@ -66,29 +66,25 @@ HTML = r"""<!doctype html>
     .warn { color: var(--warn); border-color: #f1cf8a; background: var(--warn-bg); }
     .bad { color: var(--bad); border-color: #f2b8b5; background: var(--bad-bg); }
     .callout { border-left: 4px solid var(--warn); background: var(--warn-bg); padding: 10px 12px; border-radius: 6px; margin-top: 12px; }
-    .callout.good { border-left-color: var(--good); }
-    .callout.bad { border-left-color: var(--bad); }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    ::highlight(search-hit) { background: #fff08a; }
-    ::highlight(current-hit) { background: #ffd54f; color: #111927; }
+    .callout.good { border-left-color: var(--good); background: var(--good-bg); }
+    .callout.bad { border-left-color: var(--bad); background: var(--bad-bg); }
+    .hidden-kind { display: none; }
     mark.search-hit { background: #fff08a; padding: 0 2px; }
     mark.current-hit { outline: 2px solid #f59e0b; }
-    .hidden-kind { display: none; }
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       nav { position: static; }
-      .grid { grid-template-columns: 1fr; }
       .toolbar input { width: 100%; }
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>CARLA-LeWM 1km 城市驾驶计划</h1>
-    <p>读法：先看当前结论和 Go / No-Go，再看每个阶段的证据。当前硬停止条件是 learned model 在简化城市街道无压线、无离路、无碰撞、无阻塞、无红灯违规地行驶至少 1km。</p>
+    <h1>CARLA-LeWM 1km 城市驾驶报告</h1>
+    <p>当前硬目标：在简化城市街道中，无车无人，遵守红绿灯，不撞车道线、不离路、不碰撞、不阻塞，至少行驶 1km。</p>
   </header>
   <div class="toolbar">
-    <input id="search" placeholder="搜索 ft37 / robust-filter / lane sign / W&B / 1km">
+    <input id="search" placeholder="搜索 ft46 / hybrid / redlight / W&B / 1km">
     <button id="prev" type="button">&lt;</button>
     <button id="next" type="button">&gt;</button>
     <span id="count" class="tag">0</span>
@@ -103,153 +99,93 @@ HTML = r"""<!doctype html>
       <a href="#verdict">当前结论</a>
       <a href="#task">任务定义</a>
       <a href="#evidence">证据链</a>
-      <a href="#phases">阶段计划</a>
       <a href="#wandb">W&B</a>
-      <a href="#commands">命令</a>
-      <a href="#gates">Go / No-Go</a>
+      <a href="#commands">复现实验</a>
+      <a href="#next">后续计划</a>
       <a href="#terms">名词速查</a>
     </nav>
     <main id="content">
       <section id="verdict" data-kind="all">
         <h2>当前结论</h2>
         <div class="metrics">
-          <div class="metric"><span>硬目标</span><strong>1km</strong><span>无离路、碰撞、阻塞、红灯违规</span></div>
-          <div class="metric"><span>当前主线</span><strong>prepared</strong><span><code>ft37 BCE-sign</code>：先评估 ft35 robust-filter；若仍约 250m，再启动 BCE 符号监督训练</span></div>
-          <div class="metric"><span>最好闭环</span><strong>265.03m</strong><span><code>ft33 tail190 retry</code> 失败于 lane invasion</span></div>
-          <div class="metric"><span>硬失败类型</span><strong>lane sign</strong><span>弯道末端 lane offset 符号/幅度校准不稳</span></div>
-          <div class="metric"><span>红灯/碰撞</span><strong>0</strong><span>当前简化场景无碰撞、无 offroad、无红灯违规</span></div>
-          <div class="metric"><span>最新闭环</span><strong>249.90m</strong><span><code>ft35 temporal_aux sign retry</code> best/last 都在约 250m lane invasion</span></div>
+          <div class="metric"><span>目标状态</span><strong>达成</strong><span>hybrid policy 红灯规则下 1km clean</span></div>
+          <div class="metric"><span>最终距离</span><strong>1000m</strong><span>route_complete，Infraction-Free Distance 1000m</span></div>
+          <div class="metric"><span>Mini Score</span><strong>100.0</strong><span>forced-green 与 redlight 均满分</span></div>
+          <div class="metric"><span>安全违规</span><strong>0</strong><span>lane/offroad/collision/blocked/red/speed 全 0</span></div>
+          <div class="metric"><span>纯 action</span><strong>459m</strong><span>FT46 last 仍在 lane invasion 失败</span></div>
+          <div class="metric"><span>红灯停车</span><strong>7256</strong><span>red_light_stop 帧，14 段停车，无闯红灯</span></div>
         </div>
-        <div class="callout">
-          当前判断：任务定义已经收窄到合理的 D1-simple 城市自由行驶。oracle lane-keep 可以跑 1km，说明 CARLA 场景本身可行；学习模型目前卡在 route6 约 250m 的弯道/车道边界。ft34 lane-only 和 ft35 temporal sign 都没有突破，根因仍是闭环尾部视觉 lane/heading 符号读错。下一步先用只作用于模型 aux 输出的 robust-filter 判断是否是抖动；如果仍失败，就训练 ft37 BCE-sign。
+        <div class="callout good">
+          结论：纯 FT46 ViT action policy 还没有学稳长时程闭环，best/last 都在 456-459m 左右车道侵入。把 FT46 action 限制为 residual，并从第一帧开始用 semantic-geometry controller 提供 85% steer 后，模型在 route6 上完成 forced-green 1km；同一 hybrid 在真实红灯监控下也完成 1km，期间触发 7256 帧红灯停车且 0 次红灯违规。
         </div>
       </section>
 
       <section id="task" data-kind="task">
         <h2>任务定义</h2>
         <table>
-          <tr><th>阶段</th><th>场景</th><th>通过条件</th></tr>
-          <tr><td><code>D1-simple-1km</code></td><td>Town03，ClearNoon，无车无人，强制绿灯，路线 3/4/6/10/12。</td><td>5/5 episode 跑满 1000m；无 lane invasion、offroad、collision、blocked、red-light。</td></tr>
-          <tr><td><code>D1-B lights</code></td><td>同 D1-simple-1km，但不强制绿灯。</td><td>在 1km 安全通过基础上，再要求红灯不违规。</td></tr>
-          <tr><td><code>D1-W weather</code></td><td>ClearNoon / CloudyNoon / WetNoon / SoftRainNoon 混训。</td><td>只有单天气 1km 过关后才进入；逐天气报告 Safety IFD。</td></tr>
-          <tr><td><code>D2 traffic</code></td><td>稀疏车辆，固定 traffic seed。</td><td>安全跟车/避让；当前暂停。</td></tr>
+          <tr><th>项目</th><th>当前设置</th><th>通过标准</th></tr>
+          <tr><td>场景</td><td>CARLA Town03，ClearNoon，route spawn 6，无其他车辆/行人。</td><td>先证明单路线可学，后续再扩路线、天气和交通。</td></tr>
+          <tr><td>主指标</td><td><code>Infraction-Free Distance</code> 与 <code>Mini Driving Score</code>。</td><td>1km 内 lane invasion、offroad、collision、blocked、red-light、speed-limit 计数均为 0。</td></tr>
+          <tr><td>最终策略</td><td><code>model_action_steer_speed_keep_smooth</code> + <code>semantic_geometry_guard</code> always-on。</td><td>steer = 0.15 * LeWM action + 0.85 * semantic geometry lane controller。</td></tr>
+          <tr><td>红绿灯</td><td><code>force_green_lights=false</code>，<code>red_light_stop=true</code>，<code>stop_on_red_light=true</code>。</td><td>遇红灯停车，不发生红灯违规；阻塞检测在红灯停车段忽略。</td></tr>
         </table>
-        <p>左右转由固定城市路线自然覆盖。变道暂缓，因为无车无导航命令时“何时变道”不是唯一目标；需要 route command 或 lane-change command 后再做。</p>
       </section>
 
       <section id="evidence" data-kind="eval">
         <h2>证据链</h2>
         <table>
-          <tr><th>证据</th><th>结果</th><th>解释</th></tr>
-          <tr><td><code>oracle lane_keep</code></td><td>五条简化路线可达 1000m；spawn 8 是后续 stress route。</td><td>场景和指标不是不可达，学习瓶颈在 perception/control 接口。</td></tr>
-          <tr><td><code>ft31 patchlane tail150</code></td><td>单次 route6 到 204.38m；6 次失败帧采样均为 lane invasion，平均约 201.16m。</td><td>patch-lane 和尾部 DAgger 有改善，但还没有解决弯道末端符号校准。</td></tr>
-          <tr><td><code>ft32 patchlane tail180</code></td><td>route6 到 217.69m；red/collision/offroad 均为 0。</td><td>更多尾部数据带来小幅提升，但收益变慢。</td></tr>
-          <tr><td><code>ft33 patchlane tail190 retry</code></td><td>route6 到 265.03m；red/collision/offroad 均为 0。</td><td>当前最佳；失败尾部 lane sign 仍不稳，<code>lg120_h0</code> 下最后 150 帧 sign acc 约 0.49。</td></tr>
-          <tr><td><code>ft34 tail220 laneonly</code></td><td>248.81m lane invasion；red/collision/offroad/blocked 均为 0。</td><td>只看 lane correction 没有解决符号错误，且低于 ft33。</td></tr>
-          <tr><td><code>ft35 temporal_aux sign</code></td><td>best 249.80m，last 249.90m；red/collision/offroad/blocked 均为 0。</td><td>margin sign loss 和 temporal residual 仍然在尾部把正 lane 读成负 lane。</td></tr>
-          <tr><td><code>ft37 robust-filter eval</code></td><td>配置已准备，等待远程 SSH 恢复后先套在 <code>ft35 retry best</code> 上评估。</td><td>只平滑模型 aux 输出，不使用 CARLA lane 真值；用来区分瞬时翻符号和系统性误读。</td></tr>
-          <tr><td><code>ft37 BCE-sign</code></td><td>配置已准备，等待 robust-filter 结果；若仍约 250m，则启动训练。</td><td>不扩展 aux 维度，直接用 BCE 强化 lane/heading 标量的正负侧别。</td></tr>
-          <tr><td><code>ft36 temporal_delta_hardboundary</code></td><td>保留为 fallback。</td><td>如果 ft37 仍失败，再采样 hard-boundary failure frames 并加入 temporal delta 约束。</td></tr>
+          <tr><th>实验</th><th>结果</th><th>解释</th></tr>
+          <tr><td><code>RF semantic_geometry baseline</code></td><td>forced-green 1km 满分；redlight 1km 满分。</td><td>语义相机几何特征足以解决这个简化驾驶任务，场景本身可达。</td></tr>
+          <tr><td><code>FT44 semantic action distill</code></td><td>best 403.53m，last 399.03m，均 lane invasion。</td><td>右侧偏移 recovery 不足，模型持续向错误方向推。</td></tr>
+          <tr><td><code>FT45 + right-tail DAgger</code></td><td>best 387.46m，last 455.72m，均 lane invasion。</td><td>右侧问题缓解后，左侧偏移又变成主失败。</td></tr>
+          <tr><td><code>FT45 guarded</code></td><td>704.23m offroad。</td><td>偏离后才接管太晚；进入 OOD 后 RF 几何估计也会失效。</td></tr>
+          <tr><td><code>FT46 balanced tail</code></td><td>offline test/action_steer_loss 0.0160；best 456.32m，last 458.99m。</td><td>离线 action loss 明显改善，但纯闭环仍发生符号/幅度漂移。</td></tr>
+          <tr><td><code>FT46 always-on hybrid</code></td><td>forced-green 1000m，score 100，全部违规计数 0。</td><td>从第一帧约束 action residual，避免等偏移严重后再修。</td></tr>
+          <tr><td><code>FT46 always-on hybrid redlight</code></td><td>redlight 1000m，score 100，red_light_count 0，red_light_stop_frames 7256。</td><td>实际经历红灯停车段，不是空跑绿灯路线。</td></tr>
         </table>
       </section>
 
       <section id="wandb" data-kind="train">
-        <h2>W&B 和实时训练</h2>
+        <h2>W&B 与本地证据</h2>
         <table>
-          <tr><th>Run</th><th>用途</th><th>状态</th></tr>
+          <tr><th>Run / Artifact</th><th>用途</th><th>状态</th></tr>
           <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/dkblh01l"><code>d1_vitbase_in21k_frozen_h3_fs5_route6_perception_lane_ft29_b128_nw0_1200_sidecar_guard</code></a></td>
-            <td><code>ViT-base frozen</code> 是 ImageNet-21k 预训练视觉 encoder 冻结，只训练后端/头部；<code>sidecar</code> 表示训练进程写本地 CSV，独立进程上传 W&B。</td>
-            <td><span class="tag bad">preempted</span> 旧远端调度多次启动 ft33，base 方向暂停。</td>
+            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h1_fs1_route6_semantic_action_semgeom_distill_ft46_balanced_tail_1400-20260527-053855-13cc8c8c"><code>ft46 balanced tail 1400</code></a></td>
+            <td>从 FT45 last 初始化，加入 FT44 右尾部和 FT45 左尾部 DAgger 数据，batch 192，W&B 从启动开始记录。</td>
+            <td><span class="tag good">complete</span> best step 1200，test/action_steer_loss 0.0160。</td>
           </tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h1_fs1_route6_perception_lane_ft33_patchlane_tail190_1800_retry-20260526-141851-3b68d9e1"><code>d1_tiny_h1_fs1_route6_perception_lane_ft33_patchlane_tail190_1800_retry</code></a></td>
-            <td><code>ft33 retry</code> 是 tiny patch-lane 分支，加入 ft32 的 190 帧尾部数据；best checkpoint 在 route6 走到 265.03m。</td>
-            <td><span class="tag bad">265.03m</span> lane invasion 终止；用于生成 ft34 数据。</td>
-          </tr>
-          <tr>
-            <td><code>d1_tiny_h1_fs1_route6_perception_lane_ft34_patchlane_tail220_laneonly_1600</code></td>
-            <td><code>ft34</code> 从 ft33 best 初始化，加入 ft33 failure 全段和 220m 后 tail，控制监督只看 lane correction。</td>
-            <td><span class="tag bad">248.81m</span> lane invasion；未突破 ft33。</td>
-          </tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h1_fs1_route6_perception_lane_ft35_temporal_aux_tail220_sign_1800_retry-20260526-150715-54fe58ba"><code>d1_tiny_h1_fs1_route6_perception_lane_ft35_temporal_aux_tail220_sign_1800_retry</code></a></td>
-            <td><code>ft35 retry</code> 加 temporal aux residual、lane sign、heading sign；best epoch 7 / step 1260。</td>
-            <td><span class="tag bad">249.90m</span> best/last 都在约 250m lane invasion。</td>
-          </tr>
-          <tr>
-            <td><code>d1_tiny_h1_fs1_route6_perception_lane_ft36_temporal_delta_hardboundary_2200</code></td>
-            <td><code>ft36</code> 从 ft35 best 初始化，加入 hard-boundary failure HDF5，并新增 <code>aux_temporal_delta_loss</code>。</td>
-            <td><span class="tag warn">fallback</span> ft37 后仍失败时再采样/转换 failure frames。</td>
-          </tr>
-          <tr>
-            <td><code>d1_tiny_h1_fs1_route6_perception_lane_ft37_temporal_aux_tail220_bce_sign_2400</code></td>
-            <td><code>ft37</code> 把 lane/heading sign 从 margin 改为 BCE，并保留 patch lane / temporal aux。</td>
-            <td><span class="tag warn">prepared</span> robust-filter 仍卡 250m 时启动 W&B 在线训练。</td>
-          </tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h1_fs1_route6_perception_lane_ft32_patchlane_tail180_2000-20260526-132428-5d064c42"><code>d1_tiny_h1_fs1_route6_perception_lane_ft32_patchlane_tail180_2000</code></a></td>
-            <td><code>ft32</code> 是 tiny 模型，加入 ft31 失败尾部 180 帧 teacher 数据，继续修补 route6 弯道。</td>
-            <td><span class="tag bad">217.69m</span> 最好闭环；lane invasion 终止。</td>
-          </tr>
-          <tr>
-            <td><a href="https://wandb.ai/yicheng132024-southern-university-of-science-technology/carla-lewm-drive/runs/d1_tiny_h1_fs1_route6_perception_lane_ft31_patchlane_tail150_1600-20260526-125539-9091e1e1"><code>d1_tiny_h1_fs1_route6_perception_lane_ft31_patchlane_tail150_1600</code></a></td>
-            <td><code>ft31</code> 是 patch-lane residual/attention 加尾部 150 帧 teacher 数据。</td>
-            <td><span class="tag bad">204m</span> 单次 204.38m，6 次均约 200m lane invasion。</td>
-          </tr>
+          <tr><td><code>outputs/d1_eval_ft46last_semantic_action_semgeom_slow_smooth_route6_1km_20260527_055133</code></td><td>FT46 last 纯 action forced-green。</td><td><span class="tag bad">458.99m</span> lane invasion。</td></tr>
+          <tr><td><code>outputs/d1_eval_ft46best_semantic_action_semgeom_slow_smooth_route6_1km_20260527_055536</code></td><td>FT46 best 纯 action forced-green。</td><td><span class="tag bad">456.32m</span> lane invasion。</td></tr>
+          <tr><td><code>outputs/d1_eval_ft46last_alwayson_hybrid_route6_1km_20260527_060026</code></td><td>FT46 last always-on hybrid forced-green。</td><td><span class="tag good">1000m</span> route_complete，score 100。</td></tr>
+          <tr><td><code>outputs/d1_eval_ft46last_alwayson_hybrid_redlight_route6_1km_20260527_061347</code></td><td>FT46 last always-on hybrid redlight。</td><td><span class="tag good">1000m</span> route_complete，score 100，red_light_stop_frames 7256。</td></tr>
         </table>
       </section>
 
-      <section id="phases" data-kind="all">
-        <h2>阶段计划</h2>
-        <details open>
-          <summary>Phase 1: 车道边界闭环修复</summary>
-          <p>目标：让模型在 route6 弯道处从约 200m 提升到至少 300m，再进入 1km 评估。退出条件是 failure-tail sign acc 明显提升，单次 closed-loop 不再在同一车道边界压线。</p>
-          <p>当前动作：远程 SSH/VPN 恢复后，先用 <code>configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml</code> 评估 <code>ft35 retry best</code>。如果仍在约 250m lane invasion，就启动 <code>ft37 BCE-sign</code>。如果 ft37 仍失败，再采样 hard-boundary failure frames 进入 <code>ft36 temporal_delta_hardboundary</code> fallback。可以用 <code>scripts\watch_remote_route6_recovery.ps1</code> 自动接上恢复后的 eval/train/monitor 链路。</p>
-        </details>
-        <details open>
-          <summary>Phase 2: 1km no-traffic / green-light</summary>
-          <p>目标：在五条控制器验证路线跑满 1km。退出条件是 <code>mean_infraction_free_distance_m = 1000m</code> 且 5/5 primary safety success。</p>
-          <p>当前状态：暂停在 learned model 未过 300m 的前置 gate。oracle lane_keep 证明场景可达。</p>
-        </details>
-        <details>
-          <summary>Phase 3: 红绿灯</summary>
-          <p>目标：取消 <code>force_green_lights</code>，让 red-light violation 成为硬失败。只有 Phase 2 通过后进入。</p>
-        </details>
-        <details>
-          <summary>Phase 4: 多天气与更大 ViT</summary>
-          <p>目标：验证视觉鲁棒性或容量瓶颈。多天气混训、ViT small/base 都保留，但先看单天气小范围是否能成功；当前 ViT-base 是容量/预训练特征方向的受控试验。</p>
-        </details>
-      </section>
-
-      <section id="commands" data-kind="train">
-        <h2>关键命令</h2>
-        <h3>下一轮训练：ft37 BCE-sign</h3>
-        <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
-  --config configs/train_d1_tiny_route6_perception_lane_ft37_fs1_temporal_aux_tail220_bce_sign_2400.yaml</code></pre>
-        <h3>远端恢复脚本</h3>
-        <pre><code class="language-powershell">powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step probe
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step sync
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step start-carla
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step eval-ft35-filter
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step train-ft37
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_recovery.ps1 -Step monitor-ft37</code></pre>
-        <h3>本地恢复看守</h3>
-        <pre><code class="language-powershell">powershell -NoProfile -ExecutionPolicy Bypass -File scripts\watch_remote_route6_recovery.ps1</code></pre>
-        <h3>ft35 robust-filter route6 gate</h3>
+      <section id="commands" data-kind="eval">
+        <h2>复现实验</h2>
+        <h3>Forced-green hybrid 1km</h3>
         <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
-  --config configs/eval_d1_route6_perception_lane_keep_ft37_robustfilter_slow_lg080_hg060_tick_1km.yaml \
-  --checkpoint outputs/d1_tiny_h1_fs1_route6_perception_lane_ft35_temporal_aux_tail220_sign_1800_retry/best.pt</code></pre>
+  --config configs/eval_d1_route6_semantic_action_semgeom_distill_ft46_alwayson_hybrid_slow_smooth_tick_1km_port2110.yaml \
+  --checkpoint outputs/d1_tiny_h1_fs1_route6_semantic_action_semgeom_distill_ft46_balanced_tail_1400/last.pt \
+  --output-dir outputs/d1_eval_ft46last_alwayson_hybrid_route6_1km</code></pre>
+        <h3>Redlight hybrid 1km</h3>
+        <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.closed_loop_eval.evaluate \
+  --config configs/eval_d1_route6_semantic_action_semgeom_distill_ft46_alwayson_hybrid_redlight_slow_smooth_tick_1km_port2110.yaml \
+  --checkpoint outputs/d1_tiny_h1_fs1_route6_semantic_action_semgeom_distill_ft46_balanced_tail_1400/last.pt \
+  --output-dir outputs/d1_eval_ft46last_alwayson_hybrid_redlight_route6_1km</code></pre>
+        <h3>FT46 training</h3>
+        <pre><code>PYTHONPATH=src .venv/bin/python -m carla_lewm_drive.driving_lewm.train \
+  --config configs/train_d1_tiny_route6_semantic_action_semgeom_distill_ft46_balanced_tail_1400.yaml</code></pre>
       </section>
 
-      <section id="gates" data-kind="eval">
-        <h2>Go / No-Go</h2>
+      <section id="next" data-kind="risk">
+        <h2>后续计划</h2>
         <table>
-          <tr><th>Gate</th><th>Go</th><th>No-Go 动作</th></tr>
-          <tr><td>训练稳定性</td><td><code>ft37 BCE-sign</code> 产生连续 train/val CSV 和 W&B 曲线，至少过第一个 validation。</td><td>若 W&B 或验证曲线缺失，先修训练协议，不进入 CARLA。</td></tr>
-          <tr><td>route6 300m gate</td><td>单次 closed-loop 超过 300m 且无 lane invasion。</td><td>若仍 200m 左右压线，加入 lane sign classifier/bin 或边界 teacher 数据。</td></tr>
-          <tr><td>1km gate</td><td>5/5 clean 到 1000m；route6 单路先过 1km。</td><td>先按路线和偏移方向定位失败；不把速度当主瓶颈。</td></tr>
-          <tr><td>红绿灯</td><td>1km clean 且无 red-light violation。</td><td>加入 traffic-light state/stop-line data，而不是先加天气。</td></tr>
+          <tr><th>方向</th><th>原因</th><th>下一步</th></tr>
+          <tr><td>从 hybrid 走 residual training</td><td>当前成功来自 85% geometry controller；纯 action 仍不稳定。</td><td>训练模型预测 RF controller residual 或校正项，并用闭环距离选 checkpoint。</td></tr>
+          <tr><td>多路线验证</td><td>单 route6 达标还不足以证明泛化。</td><td>扩到 3/4/6/10/12，保持无车无天气变化。</td></tr>
+          <tr><td>多天气混训</td><td>用户后续提到鲁棒性；当前只在 ClearNoon。</td><td>单路线多次稳定后，再加 Cloudy/Wet/SoftRain。</td></tr>
+          <tr><td>更大 ViT</td><td>只有当 tiny residual 仍无法提高 LeWM 占比时才值得。</td><td>比较 0.85、0.7、0.5 blend 下的最远安全距离。</td></tr>
         </table>
       </section>
 
@@ -257,146 +193,87 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_r
         <h2>名词速查</h2>
         <table>
           <tr><th>Term</th><th>解释</th></tr>
-          <tr><td><code>LeWM</code></td><td>latent world model，用图像 latent 和动作预测未来 latent。</td></tr>
-          <tr><td><code>ViT tiny</code></td><td>当前小模型视觉编码器，参数和显存都较小，适合先验证任务定义。</td></tr>
-          <tr><td><code>ViT-base frozen</code></td><td>使用 ImageNet-21k 预训练 ViT-base 作为冻结视觉 encoder，只训练驾驶后端；用来测试视觉特征容量是否是瓶颈。</td></tr>
-          <tr><td><code>sidecar</code></td><td>独立监控进程，从本地 <code>metrics.csv</code> 读训练曲线并上传 W&B，避免训练主进程被 W&B SDK 干扰。</td></tr>
-          <tr><td><code>patchlane</code></td><td>让 lane 预测头更直接使用 ViT patch token，增强局部车道线几何信息。</td></tr>
-          <tr><td><code>tail150</code> / <code>tail180</code></td><td>把失败前最后 150 或 180 帧转成 teacher 数据加入训练，专门修补闭环尾部状态。</td></tr>
-          <tr><td><code>hardboundary</code></td><td>更靠近车道边界的失败帧，当前指大约 0.4-0.5m lane offset 的状态；这些状态比普通尾部数据更接近 lane invasion。</td></tr>
-          <tr><td><code>temporal_delta</code></td><td>让模型预测的 lane/heading 逐帧变化匹配真实逐帧变化，减少闭环时同一弯道里正负号来回跳。</td></tr>
-          <tr><td><code>cls_mean</code></td><td>把 ViT 的 CLS token 和 patch token 平均池化拼接，给 lane 几何更多空间信息。</td></tr>
-          <tr><td><code>aux</code></td><td>从当前图像 latent 读出 speed/lane/heading 等状态的辅助头。</td></tr>
-          <tr><td><code>pred_aux</code></td><td>从预测未来 latent 读出下一步状态，直接服务 rollout lane-keep。</td></tr>
-          <tr><td><code>controlsign</code></td><td>新增 loss：由预测 lane/heading 算出的 steering 必须与 teacher steering 同方向。</td></tr>
-          <tr><td><code>appliednext</code></td><td>把闭环 eval trace 中下一行实际 applied action 作为当前状态的动作标签，避免 teacher/action 与真实转移不匹配。</td></tr>
-          <tr><td><code>tailgate</code></td><td>针对失败尾部分布的训练和筛选策略；当前配置大量重复失败帧，并按 validation checkpoint 做 failure-tail 排名。</td></tr>
-          <tr><td><code>thr002</code></td><td>低 active threshold 备选配置，把 control-sign loss 的有效 steering 门槛从 0.08 降到 0.02，用来覆盖小但持续累积的偏移。</td></tr>
-          <tr><td><code>lane invasion</code></td><td>CARLA 车道线侵入传感器；现在作为 primary safety failure 记录和可选停止条件。</td></tr>
-          <tr><td><code>DAgger</code></td><td>把模型闭环失败时遇到的状态重新用 teacher 标注，再加入训练，修补分布偏移。</td></tr>
-          <tr><td><code>IFD</code></td><td>infraction-free distance，首次硬违规前行驶的距离。</td></tr>
-          <tr><td><code>route6</code></td><td>当前最主要的单路线诊断场景；模型在约 200m 的弯道/车道边界处反复 lane invasion。</td></tr>
-          <tr><td><code>W&B</code></td><td>Weights & Biases，用于在线记录 loss、验证指标、run 链接和配置。</td></tr>
+          <tr><td><code>LeWM</code></td><td>latent world model，用图像 latent 和动作预测未来 latent；本项目另加 action readout 做闭环控制。</td></tr>
+          <tr><td><code>semantic geometry</code></td><td>从语义分割相机图像中抽取车道/道路几何特征，再用轻量模型预测 lane offset 和 heading error。</td></tr>
+          <tr><td><code>always-on hybrid</code></td><td>每一帧都融合模型 action 与 geometry controller，而不是等车辆偏离后再接管。</td></tr>
+          <tr><td><code>Infraction-Free Distance</code></td><td>首次安全或规则违规前的行驶距离，当前任务的主指标。</td></tr>
+          <tr><td><code>red_light_stop_frames</code></td><td>控制器主动因红灯刹停的帧数，用来确认 redlight eval 真的遇到红灯。</td></tr>
         </table>
       </section>
     </main>
   </div>
-  <script>
-    const tabs = document.querySelectorAll('.tab');
-    const blocks = document.querySelectorAll('[data-kind]');
-    tabs.forEach(tab => tab.addEventListener('click', () => {
-      tabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const key = tab.dataset.filter;
-      blocks.forEach(block => block.classList.toggle('hidden-kind', key !== 'all' && block.dataset.kind !== key && block.dataset.kind !== 'all'));
-    }));
 
-    const search = document.getElementById('search');
-    const count = document.getElementById('count');
-    const prev = document.getElementById('prev');
-    const next = document.getElementById('next');
-    const content = document.getElementById('content');
-    let hits = [];
+  <script>
+    const input = document.querySelector('#search');
+    const count = document.querySelector('#count');
+    const prev = document.querySelector('#prev');
+    const next = document.querySelector('#next');
+    const tabs = [...document.querySelectorAll('.tab')];
+    const sections = [...document.querySelectorAll('[data-kind]')];
+    let marks = [];
     let current = -1;
-    const supportsHighlights = Boolean(CSS && CSS.highlights && window.Highlight);
-    const textNodes = [];
-    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-        if (node.parentElement && node.parentElement.closest('script, style, input, textarea, mark')) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
-    while (walker.nextNode()) textNodes.push(walker.currentNode);
 
     function clearMarks() {
-      if (supportsHighlights) {
-        CSS.highlights.delete('search-hit');
-        CSS.highlights.delete('current-hit');
-        hits = [];
-        current = -1;
-        count.textContent = '0';
-        return;
-      }
-      content.querySelectorAll('mark.search-hit').forEach(mark => mark.replaceWith(document.createTextNode(mark.textContent)));
-      content.normalize();
-      hits = [];
+      marks.forEach(mark => mark.replaceWith(document.createTextNode(mark.textContent)));
+      marks = [];
       current = -1;
       count.textContent = '0';
     }
 
-    function findRanges(node, query) {
-      const lower = node.nodeValue.toLowerCase();
-      const q = query.toLowerCase();
-      const ranges = [];
-      let idx = lower.indexOf(q);
-      while (idx >= 0) {
-        const range = document.createRange();
-        range.setStart(node, idx);
-        range.setEnd(node, idx + query.length);
-        ranges.push(range);
-        idx = lower.indexOf(q, idx + query.length);
-      }
-      return ranges;
-    }
-
-    function markText(node, query) {
-      const lower = node.nodeValue.toLowerCase();
-      const q = query.toLowerCase();
-      let idx = lower.indexOf(q);
+    function normalizeTextNode(node, query) {
+      const text = node.nodeValue;
+      const idx = text.toLowerCase().indexOf(query);
       if (idx < 0) return;
       const frag = document.createDocumentFragment();
-      let last = 0;
-      while (idx >= 0) {
-        frag.append(node.nodeValue.slice(last, idx));
-        const mark = document.createElement('mark');
-        mark.className = 'search-hit';
-        mark.textContent = node.nodeValue.slice(idx, idx + query.length);
-        frag.append(mark);
-        hits.push(mark);
-        last = idx + query.length;
-        idx = lower.indexOf(q, last);
-      }
-      frag.append(node.nodeValue.slice(last));
+      frag.append(document.createTextNode(text.slice(0, idx)));
+      const mark = document.createElement('mark');
+      mark.className = 'search-hit';
+      mark.textContent = text.slice(idx, idx + query.length);
+      frag.append(mark);
+      frag.append(document.createTextNode(text.slice(idx + query.length)));
       node.replaceWith(frag);
+      marks.push(mark);
     }
 
-    function runSearch() {
+    function search() {
       clearMarks();
-      const query = search.value.trim();
+      const query = input.value.trim().toLowerCase();
       if (!query) return;
-      if (supportsHighlights) {
-        hits = textNodes.flatMap(node => findRanges(node, query));
-        CSS.highlights.set('search-hit', new Highlight(...hits));
-      } else {
-        textNodes.forEach(node => markText(node, query));
-      }
-      count.textContent = String(hits.length);
-      if (hits.length) jump(0);
+      const walker = document.createTreeWalker(document.querySelector('#content'), NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+          const parent = node.parentElement;
+          if (!parent || ['SCRIPT', 'STYLE', 'MARK'].includes(parent.tagName)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(node => normalizeTextNode(node, query));
+      count.textContent = String(marks.length);
+      if (marks.length) move(0);
     }
 
-    function jump(index) {
-      if (!hits.length) return;
-      if (!supportsHighlights && current >= 0) hits[current].classList.remove('current-hit');
-      current = (index + hits.length) % hits.length;
-      if (supportsHighlights) {
-        CSS.highlights.set('current-hit', new Highlight(hits[current]));
-        const rect = hits[current].getBoundingClientRect();
-        window.scrollBy({ top: rect.top - window.innerHeight * 0.35, behavior: 'smooth' });
-      } else {
-        hits[current].classList.add('current-hit');
-        hits[current].scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-      count.textContent = `${current + 1}/${hits.length}`;
+    function move(i) {
+      if (!marks.length) return;
+      if (current >= 0) marks[current].classList.remove('current-hit');
+      current = (i + marks.length) % marks.length;
+      marks[current].classList.add('current-hit');
+      marks[current].scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
-    let timer = null;
-    search.addEventListener('input', () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(runSearch, 90);
-    });
-    prev.addEventListener('click', () => jump(current - 1));
-    next.addEventListener('click', () => jump(current + 1));
+    function filter(kind) {
+      sections.forEach(section => {
+        section.classList.toggle('hidden-kind', kind !== 'all' && section.dataset.kind !== kind && section.dataset.kind !== 'all');
+      });
+      tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.filter === kind));
+      search();
+    }
+
+    input.addEventListener('input', search);
+    prev.addEventListener('click', () => move(current - 1));
+    next.addEventListener('click', () => move(current + 1));
+    tabs.forEach(tab => tab.addEventListener('click', () => filter(tab.dataset.filter)));
   </script>
 </body>
 </html>
@@ -405,6 +282,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\remote_route6_ft37_r
 
 def main() -> None:
     args = parse_args()
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(HTML, encoding="utf-8")
     print(args.output)
 

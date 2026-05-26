@@ -1,0 +1,83 @@
+eval:
+  label: d1_route6_semantic_geometry_lane_keep_redlight_slow_lg300_hg500_sl065_tick_1km
+  policy: semantic_geometry_lane_keep
+  semantic_geometry_model_path: outputs/semantic_geometry_lane_models/route6_semantic_rf_ft43.joblib
+  output_dir: outputs/d1_eval_semantic_geometry_redlight_slow_lg300_hg500_sl065_route6_1km
+  host: 127.0.0.1
+  port: 2110
+  timeout_s: 30.0
+  town: Town03
+  load_world: true
+  fixed_delta_seconds: 0.05
+  traffic_manager_port: 8110
+  traffic_manager_seed: 20260638
+  weather: ClearNoon
+  force_green_lights: false
+  monitor_red_lights: true
+  red_light_stop: true
+  red_light_stop_brake: 0.85
+  red_light_lookahead_m: 28.0
+  red_light_lateral_limit_m: 14.0
+  red_light_min_forward_dot: 0.15
+  red_light_grace_seconds: 0.3
+  ignore_blocked_at_red_light: true
+  route_spawn_indices: [6]
+  route_cap_m: 1000.0
+  target_speed_kmh: 5.4
+  max_episode_seconds: 1500.0
+  eval_episodes: 1
+  blocked_speed_mps: 0.1
+  blocked_seconds: 20.0
+  blocked_grace_seconds: 20.0
+  max_sim_delta_multiplier: 2.5
+  red_light_speed_threshold_mps: 0.5
+  speed_limit_kmh: 35.0
+  speed_limit_seconds: 2.0
+  speed_limit_as_infraction: false
+  stop_on_collision: true
+  stop_on_offroad: true
+  stop_on_lane_invasion: true
+  stop_on_red_light: true
+  stop_on_blocked: true
+  stop_on_speed_limit: false
+  save_contact_sheet: true
+  contact_sheet_every: 260
+  max_contact_sheet_frames: 80
+  save_frames: false
+  save_action_trace: true
+  exclusive_throttle_brake: true
+  perception_lane_filter:
+    enabled: true
+    alpha: 0.55
+    heading_alpha: 0.65
+    small_flip_abs: 0.06
+    max_flip_abs: 0.18
+    flip_decay: 0.98
+    max_abs_lane: 2.0
+    max_abs_heading: 0.7
+
+camera:
+  type: semantic
+  image_width: 224
+  image_height: 224
+  fov: 90
+  transform:
+    x: 1.4
+    y: 0.0
+    z: 1.6
+    pitch: -5.0
+    yaw: 0.0
+    roll: 0.0
+
+lane_keep:
+  target_speed_mps: 1.5
+  throttle: 0.13
+  speed_kp: 0.08
+  throttle_min: 0.02
+  throttle_max: 0.22
+  overspeed_margin_mps: 0.35
+  brake_kp: 0.14
+  steer_limit: 0.65
+  steer_bias: 0.0
+  lane_offset_gain: 3.00
+  heading_error_gain: 5.00

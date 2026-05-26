@@ -96,3 +96,29 @@ def test_carla_sequence_dataset_returns_zero_teacher_mask_without_teacher_action
 
     assert torch.all(item["teacher_action"] == item["action"])
     assert torch.all(item["teacher_action_mask"] == 0.0)
+
+
+def test_carla_sequence_dataset_can_use_custom_teacher_action_key(tmp_path):
+    path = tmp_path / "tiny_custom_teacher.h5"
+    frames = 16
+    with h5py.File(path, "w") as f:
+        f.create_dataset("ep_len", data=np.array([frames], dtype=np.int32))
+        f.create_dataset("ep_offset", data=np.array([0], dtype=np.int32))
+        f.create_dataset("pixels", data=np.full((frames, 32, 32, 3), 128, dtype=np.uint8))
+        f.create_dataset("action", data=np.zeros((frames, 3), dtype=np.float32))
+        f.create_dataset("teacher_action", data=np.ones((frames, 3), dtype=np.float32))
+        f.create_dataset("semgeom_teacher_action", data=np.full((frames, 3), 2.0, dtype=np.float32))
+        f.create_dataset("ep_idx", data=np.zeros(frames, dtype=np.int32))
+        f.create_dataset("step_idx", data=np.arange(frames, dtype=np.int32))
+
+    item = CarlaSequenceDataset(
+        path,
+        frameskip=2,
+        history_size=3,
+        num_preds=1,
+        image_size=32,
+        teacher_action_key="semgeom_teacher_action",
+    )[0]
+
+    assert torch.all(item["teacher_action"] == 2.0)
+    assert torch.all(item["teacher_action_mask"] == 1.0)
