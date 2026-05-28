@@ -19,15 +19,16 @@ HTML = r"""<!doctype html>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f8fa;
-      --panel: #ffffff;
-      --ink: #1d2433;
-      --muted: #657082;
-      --line: #d9dee7;
-      --accent: #0b6bcb;
-      --good: #0f8a72;
+      --bg: #f7f2e8;
+      --panel: #fffaf0;
+      --panel-strong: #fff3d6;
+      --ink: #14233a;
+      --muted: #5f6f82;
+      --line: #e0d3bc;
+      --accent: #1e5aa8;
+      --good: #0c7a55;
       --warn: #b96b00;
-      --bad: #b42318;
+      --bad: #a93b32;
       --good-bg: #e9f7f2;
       --warn-bg: #fff4df;
       --bad-bg: #fdeceb;
@@ -35,7 +36,7 @@ HTML = r"""<!doctype html>
     }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Inter, "Segoe UI", Arial, sans-serif; color: var(--ink); background: var(--bg); line-height: 1.55; letter-spacing: 0; }
-    header { background: #202a3a; color: #fff; padding: 22px 28px; }
+    header { background: #14233a; color: #fffaf0; padding: 22px 28px; }
     h1 { margin: 0 0 6px; font-size: 24px; }
     h2 { margin: 0 0 12px; font-size: 18px; }
     h3 { margin: 14px 0 8px; font-size: 15px; }
@@ -45,8 +46,8 @@ HTML = r"""<!doctype html>
     pre { margin: 8px 0; padding: 12px; border-radius: 8px; overflow: auto; background: #111927; color: #dbeafe; font-size: 13px; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { text-align: left; vertical-align: top; padding: 8px; border-bottom: 1px solid var(--line); }
-    th { background: #f1f4f8; }
-    .toolbar { position: sticky; top: 0; z-index: 10; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 10px 18px; background: rgba(255,255,255,.96); border-bottom: 1px solid var(--line); }
+    th { background: var(--panel-strong); }
+    .toolbar { position: sticky; top: 0; z-index: 10; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 10px 18px; background: rgba(255,250,240,.96); border-bottom: 1px solid var(--line); }
     .toolbar input { width: min(420px, 56vw); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
     button, .tab { border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: #fff; color: var(--ink); cursor: pointer; }
     button:hover, .tab.active { border-color: var(--accent); color: var(--accent); }
@@ -58,7 +59,7 @@ HTML = r"""<!doctype html>
     section, details { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
     summary { cursor: pointer; font-weight: 720; }
     .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; }
-    .metric { min-height: 92px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; }
+    .metric { min-height: 92px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fffdf7; }
     .metric strong { display: block; margin: 2px 0; font-size: 20px; }
     .metric span { color: var(--muted); font-size: 13px; }
     .tag { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
@@ -69,8 +70,8 @@ HTML = r"""<!doctype html>
     .callout.good { border-left-color: var(--good); background: var(--good-bg); }
     .callout.bad { border-left-color: var(--bad); background: var(--bad-bg); }
     .hidden-kind { display: none; }
-    mark.search-hit { background: #fff08a; padding: 0 2px; }
-    mark.current-hit { outline: 2px solid #f59e0b; }
+    .search-highlight { background: #fff08a; padding: 0 2px; }
+    .search-highlight.active { outline: 2px solid #c5652f; }
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       nav { position: static; }
@@ -84,10 +85,10 @@ HTML = r"""<!doctype html>
     <p>当前硬目标：在简化城市街道中，无车无人，遵守红绿灯，不撞车道线、不离路、不碰撞、不阻塞，至少行驶 1km。</p>
   </header>
   <div class="toolbar">
-    <input id="search" placeholder="搜索 ft46 / hybrid / redlight / W&B / 1km">
-    <button id="prev" type="button">&lt;</button>
-    <button id="next" type="button">&gt;</button>
-    <span id="count" class="tag">0</span>
+    <input id="keywordSearch" placeholder="搜索 ft46 / hybrid / pure / redlight / W&B / 1km">
+    <button id="prevSearch" type="button">&lt;</button>
+    <button id="nextSearch" type="button">&gt;</button>
+    <span id="searchStatus" class="tag">0</span>
     <button class="tab active" data-filter="all" type="button">全部</button>
     <button class="tab" data-filter="task" type="button">任务</button>
     <button class="tab" data-filter="train" type="button">训练</button>
@@ -117,6 +118,9 @@ HTML = r"""<!doctype html>
         </div>
         <div class="callout good">
           结论：纯 FT46 ViT action policy 还没有学稳长时程闭环，best/last 都在 456-459m 左右车道侵入。把 FT46 action 限制为 residual，并从第一帧开始用 semantic-geometry controller 提供 85% steer 后，模型在 route6 上完成 forced-green 1km；同一 hybrid 在真实红灯监控下也完成 1km，期间触发 7256 帧红灯停车且 0 次红灯违规。
+        </div>
+        <div class="callout bad">
+          重要边界：当前 1km 结果不能写成“纯 LeWM 已经会开 1km”。它证明的是任务、数据、红灯评估和 residual/hybrid 安全闭环已经跑通；纯 LeWM action-only 仍需要单独通过 1km gate。
         </div>
       </section>
 
@@ -189,11 +193,25 @@ HTML = r"""<!doctype html>
         </table>
       </section>
 
+      <details id="pure-gate" data-kind="risk" open>
+        <summary>纯 LeWM 验收门槛</summary>
+        <table>
+          <tr><th>Gate</th><th>标准</th><th>当前状态</th></tr>
+          <tr><td>Pure forced-green 1km</td><td><code>semantic_geometry_guard.enabled=false</code>，不混入 RF/规则 steering。</td><td><span class="tag bad">未通过</span> FT46 best/last 在 456-459m lane invasion。</td></tr>
+          <tr><td>Pure redlight 1km</td><td>在 pure forced-green 通过后再打开红灯停车与违规监控。</td><td><span class="tag warn">未开始</span> 等待 pure forced-green 先过。</td></tr>
+          <tr><td>Blend annealing</td><td>hybrid 权重从 85% 降到 70%、50%、25%、0%，每档都记录最远无违规距离。</td><td><span class="tag warn">下一轮</span> 用它判断 LeWM action 真实贡献。</td></tr>
+          <tr><td>Failure recovery audit</td><td>对 450m 左右失败区间画 <code>lane_offset</code>、<code>heading_error</code>、<code>model_steer</code> 与 teacher 差值。</td><td><span class="tag warn">下一轮</span> 验证是否是反馈增益不足或符号错误。</td></tr>
+        </table>
+      </details>
+
       <section id="terms" data-kind="all">
         <h2>名词速查</h2>
         <table>
           <tr><th>Term</th><th>解释</th></tr>
           <tr><td><code>LeWM</code></td><td>latent world model，用图像 latent 和动作预测未来 latent；本项目另加 action readout 做闭环控制。</td></tr>
+          <tr><td><code>pure action</code></td><td>闭环控制只使用模型输出的 throttle/steer/brake，不使用 RF/geometry controller 纠偏。</td></tr>
+          <tr><td><code>residual / hybrid</code></td><td>模型 action 与传统/几何控制器混合；当前成功配置是 15% LeWM steer + 85% semantic geometry steer。</td></tr>
+          <tr><td><code>closed-loop</code></td><td>每一步重新根据当前观测输出动作；它保证有反馈形式，但不自动保证稳定性。</td></tr>
           <tr><td><code>semantic geometry</code></td><td>从语义分割相机图像中抽取车道/道路几何特征，再用轻量模型预测 lane offset 和 heading error。</td></tr>
           <tr><td><code>always-on hybrid</code></td><td>每一帧都融合模型 action 与 geometry controller，而不是等车辆偏离后再接管。</td></tr>
           <tr><td><code>Infraction-Free Distance</code></td><td>首次安全或规则违规前的行驶距离，当前任务的主指标。</td></tr>
@@ -204,10 +222,10 @@ HTML = r"""<!doctype html>
   </div>
 
   <script>
-    const input = document.querySelector('#search');
-    const count = document.querySelector('#count');
-    const prev = document.querySelector('#prev');
-    const next = document.querySelector('#next');
+    const input = document.querySelector('#keywordSearch');
+    const count = document.querySelector('#searchStatus');
+    const prev = document.querySelector('#prevSearch');
+    const next = document.querySelector('#nextSearch');
     const tabs = [...document.querySelectorAll('.tab')];
     const sections = [...document.querySelectorAll('[data-kind]')];
     let marks = [];
@@ -222,17 +240,23 @@ HTML = r"""<!doctype html>
 
     function normalizeTextNode(node, query) {
       const text = node.nodeValue;
-      const idx = text.toLowerCase().indexOf(query);
+      const lower = text.toLowerCase();
+      let idx = lower.indexOf(query);
       if (idx < 0) return;
+      let cursor = 0;
       const frag = document.createDocumentFragment();
-      frag.append(document.createTextNode(text.slice(0, idx)));
-      const mark = document.createElement('mark');
-      mark.className = 'search-hit';
-      mark.textContent = text.slice(idx, idx + query.length);
-      frag.append(mark);
-      frag.append(document.createTextNode(text.slice(idx + query.length)));
+      while (idx >= 0) {
+        frag.append(document.createTextNode(text.slice(cursor, idx)));
+        const mark = document.createElement('mark');
+        mark.className = 'search-highlight';
+        mark.textContent = text.slice(idx, idx + query.length);
+        frag.append(mark);
+        marks.push(mark);
+        cursor = idx + query.length;
+        idx = lower.indexOf(query, cursor);
+      }
+      frag.append(document.createTextNode(text.slice(cursor)));
       node.replaceWith(frag);
-      marks.push(mark);
     }
 
     function search() {
@@ -256,9 +280,9 @@ HTML = r"""<!doctype html>
 
     function move(i) {
       if (!marks.length) return;
-      if (current >= 0) marks[current].classList.remove('current-hit');
+      if (current >= 0) marks[current].classList.remove('active');
       current = (i + marks.length) % marks.length;
-      marks[current].classList.add('current-hit');
+      marks[current].classList.add('active');
       marks[current].scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
